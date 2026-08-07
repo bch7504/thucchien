@@ -9,9 +9,7 @@ settings = get_settings()
 # "postgresql://") isn't installed, but psycopg3 is (already pulled in for the LangGraph
 # checkpointer) - point it at that dialect instead of adding another dependency.
 _jobstore_url = settings.database_url
-if _jobstore_url.startswith("postgresql+asyncpg://"):
-    _jobstore_url = _jobstore_url.replace("postgresql+asyncpg://", "postgresql+psycopg://", 1)
-elif _jobstore_url.startswith("postgresql://"):
+if _jobstore_url.startswith("postgresql://"):
     _jobstore_url = _jobstore_url.replace("postgresql://", "postgresql+psycopg://", 1)
 
 # SQLAlchemyJobStore persists scheduled jobs (e.g. reminders) so they survive a server restart -

@@ -14,9 +14,9 @@ import os
 import shutil
 import sys
 import time
-import urllib.error
 import urllib.request
-from datetime import UTC, datetime
+import urllib.error
+from datetime import datetime, timezone
 from pathlib import Path
 
 try:
@@ -51,18 +51,18 @@ def _archive(pending: Path) -> None:
     if not pending.exists() or pending.stat().st_size == 0:
         return
     ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
-    today = datetime.now(UTC).strftime("%Y-%m-%d")
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     archive_file = ARCHIVE_DIR / f"{today}.jsonl"
 
     existing_keys = set()
     if archive_file.exists():
-        with open(archive_file, encoding="utf-8") as f:
+        with open(archive_file, "r", encoding="utf-8") as f:
             for line in f:
                 stripped = line.strip()
                 if stripped:
                     existing_keys.add(_get_entry_key(stripped))
 
-    with open(pending, encoding="utf-8") as src, open(archive_file, "a", encoding="utf-8") as dst:
+    with open(pending, "r", encoding="utf-8") as src, open(archive_file, "a", encoding="utf-8") as dst:
         for line in src:
             stripped = line.strip()
             if stripped:

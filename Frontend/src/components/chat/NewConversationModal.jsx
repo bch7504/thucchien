@@ -3,11 +3,9 @@ import { useAuth } from '../../context/AuthContext'
 import { listUsers, createConversation } from '../../api/chat'
 import Avatar from '../common/Avatar'
 import { getInitials, getColor } from '../../utils/avatar'
-import { useWorkspace } from '../../context/WorkspaceContext'
 
 export default function NewConversationModal({ open, onClose, onCreated }) {
   const { token } = useAuth()
-  const { workspaceId, workspace } = useWorkspace()
   const [users, setUsers] = useState([])
   const [search, setSearch] = useState('')
   const [selected, setSelected] = useState([])
@@ -17,8 +15,8 @@ export default function NewConversationModal({ open, onClose, onCreated }) {
 
   useEffect(() => {
     if (!open) return
-    listUsers(token, search, workspaceId).then(setUsers).catch(() => setUsers([]))
-  }, [open, search, token, workspaceId])
+    listUsers(token, search).then(setUsers).catch(() => setUsers([]))
+  }, [open, search, token])
 
   useEffect(() => { if (!open) { setSelected([]); setGroupName(''); setSearch(''); setError('') } }, [open])
 
@@ -36,7 +34,6 @@ export default function NewConversationModal({ open, onClose, onCreated }) {
         type: selected.length > 1 ? 'group' : 'direct',
         participant_ids: selected,
         name: selected.length > 1 ? groupName.trim() : undefined,
-        workspace_id: workspaceId,
       })
       onCreated(conv)
       onClose()
@@ -52,7 +49,6 @@ export default function NewConversationModal({ open, onClose, onCreated }) {
           <form onSubmit={submit}>
             <div className="modal-body">
               {error && <div className="auth-error">{error}</div>}
-              {workspace?.type === 'personal' && <div className="relationship-notice mb-3"><i className="bi bi-people" /><div><strong>Choose a team workspace</strong><span>Create or switch workspace from the top bar, then add registered members in People.</span></div></div>}
               <input className="form-control mb-3" placeholder="Search people..." value={search} onChange={e => setSearch(e.target.value)} />
               {selected.length > 1 && (
                 <input className="form-control mb-3" placeholder="Group name" value={groupName} onChange={e => setGroupName(e.target.value)} />
@@ -65,7 +61,7 @@ export default function NewConversationModal({ open, onClose, onCreated }) {
                     <span>{u.display_name}<small className="d-block text-muted">{u.email}</small></span>
                   </label>
                 ))}
-                {!users.length && <p className="text-muted small mb-0">{workspace?.type === 'personal' ? 'Personal workspaces do not have chat members.' : 'No members found. Add them from People.'}</p>}
+                {!users.length && <p className="text-muted small mb-0">No users found.</p>}
               </div>
             </div>
             <div className="modal-footer">

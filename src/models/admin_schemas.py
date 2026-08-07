@@ -13,7 +13,6 @@ class AdminUserOut(BaseModel):
     email: str
     display_name: str
     role: str
-    platform_role: Literal["user", "platform_admin"]
     is_active: bool
     created_at: datetime
 

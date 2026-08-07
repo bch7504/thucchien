@@ -3,22 +3,10 @@ import pytest
 
 async def _create_direct_conversation(client, creator_headers, other_headers):
     other_me = await client.get("/api/v1/auth/me", headers=other_headers)
-    other = other_me.json()
-    workspace = (
-        await client.post("/api/v1/workspaces", json={"name": "AI permission test"}, headers=creator_headers)
-    ).json()
-    member = await client.post(
-        f"/api/v1/workspaces/{workspace['id']}/members",
-        json={"email": other["email"], "role": "member"},
-        headers=creator_headers,
-    )
-    assert member.status_code == 201
+    other_id = other_me.json()["id"]
     conv = await client.post(
-        "/api/v1/conversations",
-        json={"type": "direct", "participant_ids": [other["id"]], "workspace_id": workspace["id"]},
-        headers=creator_headers,
+        "/api/v1/conversations", json={"type": "direct", "participant_ids": [other_id]}, headers=creator_headers
     )
-    assert conv.status_code == 200
     return conv.json()["id"]
 
 
@@ -81,28 +69,22 @@ async def test_ai_permission_grant_is_per_user_not_shared(client, auth_headers, 
 
 @pytest.mark.asyncio
 async def test_ai_permission_get_requires_participant(client, auth_headers, other_auth_headers):
-    await client.post(
+    third = await client.post(
         "/api/v1/auth/register",
         json={"email": "carol2@example.com", "password": "password123", "display_name": "Carol"},
-    )
-    third = await client.post(
-        "/api/v1/auth/login", json={"email": "carol2@example.com", "password": "password123"}
     )
     third_headers = {"Authorization": f"Bearer {third.json()['access_token']}"}
     conversation_id = await _create_direct_conversation(client, auth_headers, other_auth_headers)
 
     response = await client.get(f"/api/v1/conversations/{conversation_id}/ai-permission", headers=third_headers)
-    assert response.status_code == 404
+    assert response.status_code == 403
 
 
 @pytest.mark.asyncio
 async def test_ai_permission_put_requires_participant(client, auth_headers, other_auth_headers):
-    await client.post(
+    third = await client.post(
         "/api/v1/auth/register",
         json={"email": "carol3@example.com", "password": "password123", "display_name": "Carol"},
-    )
-    third = await client.post(
-        "/api/v1/auth/login", json={"email": "carol3@example.com", "password": "password123"}
     )
     third_headers = {"Authorization": f"Bearer {third.json()['access_token']}"}
     conversation_id = await _create_direct_conversation(client, auth_headers, other_auth_headers)
@@ -110,4 +92,4 @@ async def test_ai_permission_put_requires_participant(client, auth_headers, othe
     response = await client.put(
         f"/api/v1/conversations/{conversation_id}/ai-permission", json={"granted": True}, headers=third_headers
     )
-    assert response.status_code == 404
+    assert response.status_code == 403

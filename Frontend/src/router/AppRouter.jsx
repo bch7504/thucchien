@@ -1,61 +1,20 @@
-import { lazy, Suspense } from 'react'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import AppLayout from '../components/layout/AppLayout'
-import AdminRoute from './AdminRoute'
 import ProtectedRoute from './ProtectedRoute'
+import AdminRoute from './AdminRoute'
+import LoginPage from '../pages/LoginPage'
+import RegisterPage from '../pages/RegisterPage'
+import ChatPage from '../pages/ChatPage'
+import TaskPage from '../pages/TaskPage'
+import TaskInboxPage from '../pages/TaskInboxPage'
+import CalendarPage from '../pages/CalendarPage'
+import ReminderPage from '../pages/ReminderPage'
+import MemoryPage from '../pages/MemoryPage'
+import ProfilePage from '../pages/ProfilePage'
+import PersonalAssistantPage from '../pages/PersonalAssistantPage'
+import AdminDashboardPage from '../pages/admin/AdminDashboardPage'
+import AdminUsersPage from '../pages/admin/AdminUsersPage'
+import AdminConversationsPage from '../pages/admin/AdminConversationsPage'
+import AdminUserDataPage from '../pages/admin/AdminUserDataPage'
 
-const LoginPage = lazy(() => import('../pages/LoginPage'))
-const RegisterPage = lazy(() => import('../pages/RegisterPage'))
-const ChatPage = lazy(() => import('../pages/ChatPage'))
-const TaskPage = lazy(() => import('../pages/TaskPage'))
-const TaskInboxPage = lazy(() => import('../pages/TaskInboxPage'))
-const CalendarPage = lazy(() => import('../pages/CalendarPage'))
-const ReminderPage = lazy(() => import('../pages/ReminderPage'))
-const MemoryPage = lazy(() => import('../pages/MemoryPage'))
-const ProfilePage = lazy(() => import('../pages/ProfilePage'))
-const PersonalAssistantPage = lazy(() => import('../pages/PersonalAssistantPage'))
-const RelationshipsPage = lazy(() => import('../pages/RelationshipsPage'))
-const AdminDashboardPage = lazy(() => import('../pages/admin/AdminDashboardPage'))
-const AdminUsersPage = lazy(() => import('../pages/admin/AdminUsersPage'))
-const AdminUserDataPage = lazy(() => import('../pages/admin/AdminUserDataPage'))
-
-function RouteFallback() {
-  return (
-    <div className="d-flex justify-content-center align-items-center min-vh-100" role="status">
-      <div className="spinner-border text-primary" aria-label="Loading page" />
-    </div>
-  )
-}
-
-export default function AppRouter() {
-  return (
-    <BrowserRouter>
-      <Suspense fallback={<RouteFallback />}>
-        <Routes>
-          <Route path="/" element={<Navigate to="/assistant" replace />} />
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/register" element={<RegisterPage />} />
-          <Route element={<ProtectedRoute />}>
-            <Route element={<AppLayout />}>
-              <Route path="/assistant" element={<PersonalAssistantPage />} />
-              <Route path="/chat" element={<ChatPage />} />
-              <Route path="/relationships" element={<RelationshipsPage />} />
-              <Route path="/tasks" element={<TaskPage />} />
-              <Route path="/tasks/inbox" element={<TaskInboxPage />} />
-              <Route path="/calendar" element={<CalendarPage />} />
-              <Route path="/reminders" element={<ReminderPage />} />
-              <Route path="/memory" element={<MemoryPage />} />
-              <Route path="/profile" element={<ProfilePage />} />
-              <Route element={<AdminRoute />}>
-                <Route path="/admin" element={<AdminDashboardPage />} />
-                <Route path="/admin/users" element={<AdminUsersPage />} />
-                <Route path="/admin/user-data" element={<AdminUserDataPage />} />
-              </Route>
-            </Route>
-          </Route>
-          <Route path="*" element={<Navigate to="/assistant" replace />} />
-        </Routes>
-      </Suspense>
-    </BrowserRouter>
-  )
-}
+export default function AppRouter(){return <BrowserRouter><Routes><Route path="/" element={<Navigate to="/assistant" replace/>}/><Route path="/login" element={<LoginPage/>}/><Route path="/register" element={<RegisterPage/>}/><Route element={<ProtectedRoute/>}><Route element={<AppLayout/>}><Route path="/assistant" element={<PersonalAssistantPage/>}/><Route path="/chat" element={<ChatPage/>}/><Route path="/tasks" element={<TaskPage/>}/><Route path="/tasks/inbox" element={<TaskInboxPage/>}/><Route path="/calendar" element={<CalendarPage/>}/><Route path="/reminders" element={<ReminderPage/>}/><Route path="/memory" element={<MemoryPage/>}/><Route path="/profile" element={<ProfilePage/>}/><Route element={<AdminRoute/>}><Route path="/admin" element={<AdminDashboardPage/>}/><Route path="/admin/users" element={<AdminUsersPage/>}/><Route path="/admin/conversations" element={<AdminConversationsPage/>}/><Route path="/admin/user-data" element={<AdminUserDataPage/>}/></Route></Route></Route><Route path="*" element={<Navigate to="/assistant" replace/>}/></Routes></BrowserRouter>}

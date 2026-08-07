@@ -18,7 +18,7 @@ export default function AdminUsersPage() {
   useEffect(() => { refresh() }, [token, search])
 
   const toggleRole = async (u) => {
-    const updated = await updateUserRole(token, u.id, u.platform_role === 'platform_admin' ? 'user' : 'admin')
+    const updated = await updateUserRole(token, u.id, u.role === 'admin' ? 'user' : 'admin')
     setUsers(list => list.map(x => x.id === updated.id ? updated : x))
   }
 

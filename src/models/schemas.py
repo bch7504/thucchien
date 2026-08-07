@@ -13,8 +13,6 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=5000, description="Tin nhắn từ user")
     thread_id: str | None = Field(default=None, description="Conversation thread id; generated if omitted")
-    workspace_id: str | None = Field(default=None, description="Active workspace for workspace-scoped agent tools")
-    context_limit: int = Field(default=20, ge=1, le=50)
     messages: list[ChatMessage] | None = Field(
         default=None,
         description="Raw message history to summarize (read by summarize_conversation via state)",

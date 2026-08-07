@@ -3,29 +3,9 @@ from unittest.mock import MagicMock
 from zoneinfo import ZoneInfo
 
 import pytest
-from sqlalchemy import select
 
 from src.config import get_settings
-from src.db import session as db_session
-from src.db.models import Task
 from src.services import calendar_service
-
-
-async def _create_proactive_task(client, auth_headers, *, title, due_at=None):
-    created = (
-        await client.post(
-            "/api/v1/tasks",
-            json={"title": title, "due_at": due_at, "source": "manual"},
-            headers=auth_headers,
-        )
-    ).json()
-    async with db_session.async_session_maker() as db:
-        task = (await db.execute(select(Task).where(Task.id == created["id"]))).scalar_one()
-        task.source = "proactive"
-        task.status = "suggested"
-        await db.commit()
-    tasks = (await client.get("/api/v1/tasks", headers=auth_headers)).json()
-    return next(task for task in tasks if task["id"] == created["id"])
 
 
 @pytest.mark.asyncio
@@ -37,8 +17,7 @@ async def test_create_and_list_task(client, auth_headers):
     body = resp.json()
     assert body["title"] == "Send report"
     assert body["priority"] == "High"
-    assert body["status"] == "pending"
-    assert body["source"] == "manual"
+    assert body["status"] == "suggested"
     assert body["source"] == "manual"
 
     resp = await client.get("/api/v1/tasks", headers=auth_headers)
@@ -163,9 +142,13 @@ async def test_accepting_proactive_task_with_due_date_creates_calendar_event_and
     }
     monkeypatch.setattr(calendar_service, "get_calendar_service", lambda: fake_service)
 
-    created = await _create_proactive_task(
-        client, auth_headers, title="Product launch call", due_at="2026-08-10T15:00:00"
-    )
+    created = (
+        await client.post(
+            "/api/v1/tasks",
+            json={"title": "Product launch call", "due_at": "2026-08-10T15:00:00", "source": "proactive"},
+            headers=auth_headers,
+        )
+    ).json()
     assert created["status"] == "suggested"
 
     resp = await client.patch(
@@ -209,7 +192,11 @@ async def test_accepting_proactive_task_without_due_date_does_not_touch_calendar
     fake_service = MagicMock()
     monkeypatch.setattr(calendar_service, "get_calendar_service", lambda: fake_service)
 
-    created = await _create_proactive_task(client, auth_headers, title="No due date")
+    created = (
+        await client.post(
+            "/api/v1/tasks", json={"title": "No due date", "source": "proactive"}, headers=auth_headers
+        )
+    ).json()
     assert created["due_at"] is None
 
     resp = await client.patch(
@@ -228,9 +215,13 @@ async def test_accepting_proactive_task_survives_calendar_failure(client, auth_h
 
     monkeypatch.setattr(calendar_service, "get_calendar_service", _broken_get_calendar_service)
 
-    created = await _create_proactive_task(
-        client, auth_headers, title="Flaky calendar", due_at="2026-08-10T15:00:00"
-    )
+    created = (
+        await client.post(
+            "/api/v1/tasks",
+            json={"title": "Flaky calendar", "due_at": "2026-08-10T15:00:00", "source": "proactive"},
+            headers=auth_headers,
+        )
+    ).json()
 
     resp = await client.patch(
         f"/api/v1/tasks/{created['id']}/status", json={"status": "pending"}, headers=auth_headers

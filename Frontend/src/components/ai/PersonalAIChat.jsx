@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useAuth } from '../../context/AuthContext'
-import { useWorkspace } from '../../context/WorkspaceContext'
 import { chatWithAgent, resumeAgent } from '../../api/agent'
 
 const prompts = [
@@ -20,7 +19,6 @@ function describeInterrupt(interrupt) {
 
 export default function PersonalAIChat({ onContext }) {
   const { token, user } = useAuth()
-  const { workspaceId } = useWorkspace()
   const [draft,setDraft]=useState('')
   const [messages,setMessages]=useState([])
   const [threadId,setThreadId]=useState(null)
@@ -45,7 +43,7 @@ export default function PersonalAIChat({ onContext }) {
     setDraft('')
     setSending(true)
     try {
-      const res = await chatWithAgent(token, { message: value, thread_id: threadId, workspace_id: workspaceId, context_limit: 20 })
+      const res = await chatWithAgent(token, { message: value, thread_id: threadId })
       handleResult(res)
     } catch (err) {
       pushMessage({ text: err.detail || 'Không gọi được AI Assistant, thử lại sau.' })

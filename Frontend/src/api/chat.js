@@ -1,17 +1,12 @@
 import { apiFetch } from './client'
 
-export const listUsers = (token, search, workspaceId) => {
-  const params = new URLSearchParams()
-  if (search) params.set('search', search)
-  if (workspaceId) params.set('workspace_id', workspaceId)
-  return apiFetch(`/users${params.toString() ? `?${params.toString()}` : ''}`, { token })
-}
+export const listUsers = (token, search) =>
+  apiFetch(`/users${search ? `?search=${encodeURIComponent(search)}` : ''}`, { token })
 
-export const listConversations = (token, workspaceId) =>
-  apiFetch(`/conversations${workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : ''}`, { token })
+export const listConversations = (token) => apiFetch('/conversations', { token })
 
-export const createConversation = (token, { type, participant_ids, name, workspace_id }) =>
-  apiFetch('/conversations', { method: 'POST', token, body: { type, participant_ids, name, workspace_id } })
+export const createConversation = (token, { type, participant_ids, name }) =>
+  apiFetch('/conversations', { method: 'POST', token, body: { type, participant_ids, name } })
 
 export const getMessages = (token, conversationId, { before, limit = 50 } = {}) => {
   const params = new URLSearchParams({ limit: String(limit) })

@@ -1,20 +1,7 @@
-import asyncio
-from typing import Annotated
-
 from langchain_core.tools import tool
-from langgraph.prebuilt import InjectedState
 from langgraph.types import interrupt
 
-from src.agents.state import AgentState
 from src.services import calendar_service
-
-
-def _agent_identity(state: AgentState | None) -> tuple[str, str]:
-    user_id = (state or {}).get("user_id")
-    workspace_id = (state or {}).get("workspace_id")
-    if not user_id or not workspace_id:
-        raise ValueError("Authenticated user and workspace context are required")
-    return user_id, workspace_id
 
 
 @tool
@@ -24,7 +11,6 @@ async def create_calendar_event(
     end_iso: str,
     description: str = "",
     attendees: list[str] | None = None,
-    state: Annotated[AgentState, InjectedState] = None,  # type: ignore[assignment]
 ) -> str:
     """Draft a Google Calendar event. Requires the user's explicit confirmation before it is
     actually created.
@@ -48,29 +34,19 @@ async def create_calendar_event(
         return "Calendar event was not created (user declined)."
 
     draft.update(decision.get("edits") or {})
-    user_id, workspace_id = _agent_identity(state)
-    await calendar_service.authorize_calendar_access(user_id, workspace_id)
-    created = await asyncio.to_thread(
-        calendar_service.create_event,
-        draft["summary"],
-        draft["start"],
-        draft["end"],
-        draft["description"],
-        draft["attendees"],
+    created = calendar_service.create_event(
+        summary=draft["summary"],
+        start_iso=draft["start"],
+        end_iso=draft["end"],
+        description=draft["description"],
+        attendees=draft["attendees"],
     )
-    await calendar_service.broadcast_change(
-        workspace_id, "calendar_event_created", {"event": calendar_service.to_out_dict(created)}
-    )
+    await calendar_service.broadcast_change("calendar_event_created", {"event": calendar_service.to_out_dict(created)})
     return f"Event created: {created.get('htmlLink', created.get('id'))}"
 
 
 @tool
-async def list_calendar_events(
-    time_min_iso: str,
-    time_max_iso: str,
-    max_results: int = 10,
-    state: Annotated[AgentState, InjectedState] = None,  # type: ignore[assignment]
-) -> str:
+async def list_calendar_events(time_min_iso: str, time_max_iso: str, max_results: int = 10) -> str:
     """List existing calendar events in a time range. Read-only, no confirmation needed.
 
     Args:
@@ -78,9 +54,7 @@ async def list_calendar_events(
         time_max_iso: End of the range as an ISO 8601 datetime string.
         max_results: Maximum number of events to return.
     """
-    user_id, workspace_id = _agent_identity(state)
-    await calendar_service.authorize_calendar_access(user_id, workspace_id)
-    items = await asyncio.to_thread(calendar_service.list_events, time_min_iso, time_max_iso, max_results)
+    items = calendar_service.list_events(time_min_iso, time_max_iso, max_results)
     if not items:
         return "No events found in that range."
     return "\n".join(
@@ -96,7 +70,6 @@ async def update_calendar_event(
     start_iso: str | None = None,
     end_iso: str | None = None,
     description: str | None = None,
-    state: Annotated[AgentState, InjectedState] = None,  # type: ignore[assignment]
 ) -> str:
     """Draft changes to an existing Google Calendar event (found via list_calendar_events).
     Requires the user's explicit confirmation before they take effect. Only pass the fields
@@ -115,27 +88,19 @@ async def update_calendar_event(
         return "Calendar event was not updated (user declined)."
 
     draft.update(decision.get("edits") or {})
-    user_id, workspace_id = _agent_identity(state)
-    await calendar_service.authorize_calendar_access(user_id, workspace_id)
-    updated = await asyncio.to_thread(
-        calendar_service.update_event,
-        draft["event_id"],
-        draft["summary"],
-        draft["start"],
-        draft["end"],
-        draft["description"],
+    updated = calendar_service.update_event(
+        event_id=draft["event_id"],
+        summary=draft["summary"],
+        start_iso=draft["start"],
+        end_iso=draft["end"],
+        description=draft["description"],
     )
-    await calendar_service.broadcast_change(
-        workspace_id, "calendar_event_updated", {"event": calendar_service.to_out_dict(updated)}
-    )
+    await calendar_service.broadcast_change("calendar_event_updated", {"event": calendar_service.to_out_dict(updated)})
     return f"Event updated: {updated.get('htmlLink', updated.get('id'))}"
 
 
 @tool
-async def delete_calendar_event(
-    event_id: str,
-    state: Annotated[AgentState, InjectedState] = None,  # type: ignore[assignment]
-) -> str:
+async def delete_calendar_event(event_id: str) -> str:
     """Draft the deletion of an existing Google Calendar event (found via list_calendar_events).
     Requires the user's explicit confirmation before it is actually deleted.
 
@@ -146,8 +111,6 @@ async def delete_calendar_event(
     if not decision or not decision.get("approved"):
         return "Calendar event was not deleted (user declined)."
 
-    user_id, workspace_id = _agent_identity(state)
-    await calendar_service.authorize_calendar_access(user_id, workspace_id)
-    await asyncio.to_thread(calendar_service.delete_event, event_id)
-    await calendar_service.broadcast_change(workspace_id, "calendar_event_deleted", {"event_id": event_id})
+    calendar_service.delete_event(event_id)
+    await calendar_service.broadcast_change("calendar_event_deleted", {"event_id": event_id})
     return "Event deleted."

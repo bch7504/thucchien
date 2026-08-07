@@ -23,7 +23,6 @@ class UserPublic(BaseModel):
     email: str
     display_name: str
     role: str
-    platform_role: Literal["user", "platform_admin"]
     job_title: str = ""
     timezone: str = "Asia/Ho_Chi_Minh"
     preferences: dict = Field(default_factory=dict)

@@ -1,4 +1,4 @@
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 from langchain_core.messages import AIMessage, ToolMessage
@@ -11,23 +11,6 @@ def _no_live_llm(monkeypatch, fake_llm_factory):
     llm = fake_llm_factory([reply])
     monkeypatch.setattr("src.agents.nodes.planner_node.get_llm", lambda: llm)
     return llm
-
-
-async def _team_workspace(client, owner_headers, member: dict) -> dict:
-    workspace_response = await client.post(
-        "/api/v1/workspaces",
-        json={"name": "Agent route test team"},
-        headers=owner_headers,
-    )
-    assert workspace_response.status_code == 201
-    workspace = workspace_response.json()
-    member_response = await client.post(
-        f"/api/v1/workspaces/{workspace['id']}/members",
-        json={"email": member["email"], "role": "member"},
-        headers=owner_headers,
-    )
-    assert member_response.status_code == 201
-    return workspace
 
 
 @pytest.mark.asyncio
@@ -55,22 +38,15 @@ async def test_chat_rejects_conversation_id_caller_is_not_a_participant_of(
     client, auth_headers, other_auth_headers
 ):
     # A third user's conversation with other_auth_headers' user - auth_headers' user is in neither.
-    await client.post(
+    third = await client.post(
         "/api/v1/auth/register",
         json={"email": "carol@example.com", "password": "password123", "display_name": "Carol"},
     )
-    third = await client.post(
-        "/api/v1/auth/login",
-        json={"email": "carol@example.com", "password": "password123"},
-    )
     third_headers = {"Authorization": f"Bearer {third.json()['access_token']}"}
     other_me = await client.get("/api/v1/auth/me", headers=other_auth_headers)
-    other = other_me.json()
-    workspace = await _team_workspace(client, third_headers, other)
+    other_id = other_me.json()["id"]
     conv = await client.post(
-        "/api/v1/conversations",
-        json={"type": "direct", "participant_ids": [other["id"]], "workspace_id": workspace["id"]},
-        headers=third_headers,
+        "/api/v1/conversations", json={"type": "direct", "participant_ids": [other_id]}, headers=third_headers
     )
     conversation_id = conv.json()["id"]
 
@@ -81,18 +57,15 @@ async def test_chat_rejects_conversation_id_caller_is_not_a_participant_of(
         json={"message": "Summarize this.", "conversation_id": conversation_id},
         headers=auth_headers,
     )
-    assert response.status_code == 404
+    assert response.status_code == 403
 
 
 @pytest.mark.asyncio
 async def test_chat_rejects_conversation_id_when_ai_permission_not_granted(client, auth_headers, other_auth_headers):
     other_me = await client.get("/api/v1/auth/me", headers=other_auth_headers)
-    other = other_me.json()
-    workspace = await _team_workspace(client, auth_headers, other)
+    other_id = other_me.json()["id"]
     conv = await client.post(
-        "/api/v1/conversations",
-        json={"type": "direct", "participant_ids": [other["id"]], "workspace_id": workspace["id"]},
-        headers=auth_headers,
+        "/api/v1/conversations", json={"type": "direct", "participant_ids": [other_id]}, headers=auth_headers
     )
     conversation_id = conv.json()["id"]
 
@@ -108,12 +81,9 @@ async def test_chat_rejects_conversation_id_when_ai_permission_not_granted(clien
 @pytest.mark.asyncio
 async def test_chat_allows_conversation_id_caller_is_a_participant_of(client, auth_headers, other_auth_headers):
     other_me = await client.get("/api/v1/auth/me", headers=other_auth_headers)
-    other = other_me.json()
-    workspace = await _team_workspace(client, auth_headers, other)
+    other_id = other_me.json()["id"]
     conv = await client.post(
-        "/api/v1/conversations",
-        json={"type": "direct", "participant_ids": [other["id"]], "workspace_id": workspace["id"]},
-        headers=auth_headers,
+        "/api/v1/conversations", json={"type": "direct", "participant_ids": [other_id]}, headers=auth_headers
     )
     conversation_id = conv.json()["id"]
     await client.put(
@@ -149,7 +119,7 @@ async def test_chat_surfaces_llm_error_instead_of_empty_response(client, auth_he
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "error"
-    assert data["response"] == "Dịch vụ AI tạm thời không khả dụng. Vui lòng thử lại sau."
+    assert data["response"] == "Rate limit reached"
 
 
 @pytest.mark.asyncio
@@ -186,8 +156,6 @@ async def test_chat_interrupts_and_resume_completes(client, auth_headers, monkey
     fake_service = MagicMock()
     fake_service.events.return_value.insert.return_value.execute.return_value = {"id": "evt-1"}
     monkeypatch.setattr(calendar_service, "get_calendar_service", lambda: fake_service)
-    monkeypatch.setattr(calendar_service, "authorize_calendar_access", AsyncMock())
-    monkeypatch.setattr(calendar_service, "broadcast_change", AsyncMock())
 
     def _final_message(state):
         last = state["messages"][-1]
@@ -269,8 +237,6 @@ async def test_chat_resume_not_blocked_by_budget(client, auth_headers, monkeypat
     fake_service = MagicMock()
     fake_service.events.return_value.insert.return_value.execute.return_value = {"id": "evt-1"}
     monkeypatch.setattr(calendar_service, "get_calendar_service", lambda: fake_service)
-    monkeypatch.setattr(calendar_service, "authorize_calendar_access", AsyncMock())
-    monkeypatch.setattr(calendar_service, "broadcast_change", AsyncMock())
 
     def _final_message(state):
         last = state["messages"][-1]

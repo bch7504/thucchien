@@ -4,8 +4,6 @@ from src.agents.tools.calendar_tool import (
     list_calendar_events,
     update_calendar_event,
 )
-from src.agents.tools.context_tool import list_my_tasks, search_my_memories
-from src.agents.tools.people_tool import search_people_context
 from src.agents.tools.reminder_tool import create_reminder, list_reminders
 from src.agents.tools.summarize_tool import summarize_conversation
 from src.agents.tools.task_tool import extract_tasks
@@ -21,9 +19,6 @@ ALL_TOOLS = [
     delete_calendar_event,
     create_reminder,
     list_reminders,
-    list_my_tasks,
-    search_my_memories,
-    search_people_context,
 ]
 
 __all__ = [
@@ -36,7 +31,4 @@ __all__ = [
     "delete_calendar_event",
     "create_reminder",
     "list_reminders",
-    "list_my_tasks",
-    "search_my_memories",
-    "search_people_context",
 ]

@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import PageHeader from '../components/common/PageHeader'
 import MemoryModal from '../components/memory/MemoryModal'
 import { useAuth } from '../context/AuthContext'
-import { useWorkspace } from '../context/WorkspaceContext'
 import { listMemories, deleteMemory } from '../api/memories'
 import { formatDateShort } from '../utils/datetime'
 
@@ -17,23 +16,19 @@ const DEFAULT_STYLE = { icon: 'bi-stars', color: '#64748b' }
 
 export default function MemoryPage() {
   const { token } = useAuth()
-  const { workspaceId } = useWorkspace()
   const [memories, setMemories] = useState([])
   const [loading, setLoading] = useState(true)
   const [query, setQuery] = useState('')
   const [tab, setTab] = useState('All')
   const [modalOpen, setModalOpen] = useState(false)
   const [editing, setEditing] = useState(null)
-  const [error, setError] = useState('')
 
   const refresh = () => {
     setLoading(true)
-    if (!workspaceId) return
-    setError('')
-    listMemories(token, workspaceId).then(setMemories).catch(err => setError(err.detail || 'Could not load memories.')).finally(() => setLoading(false))
+    listMemories(token).then(setMemories).finally(() => setLoading(false))
   }
 
-  useEffect(() => { refresh() }, [token, workspaceId])
+  useEffect(() => { refresh() }, [token])
 
   const categories = ['All', ...new Set(memories.map(m => m.category))]
   const shown = memories
@@ -46,11 +41,10 @@ export default function MemoryPage() {
     const exists = prev.some(m => m.id === saved.id)
     return exists ? prev.map(m => m.id === saved.id ? saved : m) : [saved, ...prev]
   })
-  const remove = (m) => deleteMemory(token, m.id).then(() => setMemories(prev => prev.filter(x => x.id !== m.id))).catch(err => setError(err.detail || 'Could not delete memory.'))
+  const remove = (m) => deleteMemory(token, m.id).then(() => setMemories(prev => prev.filter(x => x.id !== m.id)))
 
   return <div className="page-container">
     <PageHeader eyebrow="Personal context" title="Memory" description="The helpful details Orbit remembers to personalize your experience." action={<button className="btn btn-primary" onClick={openAdd}><i className="bi bi-plus-lg me-2"/>Add memory</button>}/>
-    {error && <div className="auth-error mb-3">{error}</div>}
     <div className="memory-toolbar"><div className="memory-search"><i className="bi bi-search"/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search memories..."/></div><div className="memory-tabs">{categories.map(c=><button key={c} className={tab===c?'active':''} onClick={()=>setTab(c)}>{c} {c==='All'&&<span>{memories.length}</span>}</button>)}</div></div>
     {loading ? <p className="text-muted small">Loading...</p> : <div className="memory-grid">{shown.map(m=>{
       const style = CATEGORY_STYLE[m.category] || DEFAULT_STYLE

@@ -1,6 +1,6 @@
 from datetime import UTC, datetime, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -10,7 +10,9 @@ from src.config import get_settings
 from src.db.models import Conversation, Memory, Message, Reminder, Task, User
 from src.db.session import get_db
 from src.models.admin_schemas import (
+    AdminConversationOut,
     AdminMemoryOut,
+    AdminMessageOut,
     AdminReminderOut,
     AdminStats,
     AdminTaskOut,
@@ -19,8 +21,6 @@ from src.models.admin_schemas import (
     UpdateStatusRequest,
 )
 from src.services import reminder_service, usage_service
-from src.services.audit_service import record_audit_event
-from src.services.authorization_service import require_support_scope
 
 router = APIRouter(dependencies=[Depends(require_admin)])
 
@@ -51,6 +51,7 @@ async def get_stats(db: AsyncSession = Depends(get_db)) -> AdminStats:
     budget = get_settings().daily_token_budget
     usage = await usage_service.get_usage_today()
     budget_used_pct = round(usage["total_tokens"] / budget * 100, 1) if budget else 0.0
+
     return AdminStats(
         total_users=total_users,
         total_conversations=total_conversations,
@@ -64,17 +65,12 @@ async def get_stats(db: AsyncSession = Depends(get_db)) -> AdminStats:
 
 
 @router.get("/users", response_model=list[AdminUserOut])
-async def list_users(
-    q: str | None = None,
-    limit: int = Query(default=100, ge=1, le=500),
-    offset: int = Query(default=0, ge=0),
-    db: AsyncSession = Depends(get_db),
-) -> list[AdminUserOut]:
+async def list_users(q: str | None = None, db: AsyncSession = Depends(get_db)) -> list[AdminUserOut]:
     stmt = select(User).order_by(User.created_at.desc())
     if q:
         pattern = f"%{q}%"
         stmt = stmt.where((User.email.ilike(pattern)) | (User.display_name.ilike(pattern)))
-    users = (await db.execute(stmt.offset(offset).limit(limit))).scalars().all()
+    users = (await db.execute(stmt)).scalars().all()
     return [AdminUserOut.model_validate(u, from_attributes=True) for u in users]
 
 
@@ -89,16 +85,6 @@ async def update_user_role(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot change your own role")
     user = await _get_user_or_404(user_id, db)
     user.role = request.role
-    user.platform_role = "platform_admin" if request.role == "admin" else "user"
-    await record_audit_event(
-        db,
-        actor=current_user,
-        action="platform.user_role_changed",
-        target_type="user",
-        target_id=user.id,
-        workspace_id=None,
-        metadata={"role": user.role, "platform_role": user.platform_role},
-    )
     await db.commit()
     await db.refresh(user)
     return AdminUserOut.model_validate(user, from_attributes=True)
@@ -115,43 +101,80 @@ async def update_user_status(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot change your own status")
     user = await _get_user_or_404(user_id, db)
     user.is_active = request.is_active
-    await record_audit_event(
-        db,
-        actor=current_user,
-        action="platform.user_status_changed",
-        target_type="user",
-        target_id=user.id,
-        workspace_id=None,
-        metadata={"is_active": user.is_active},
-    )
     await db.commit()
     await db.refresh(user)
     return AdminUserOut.model_validate(user, from_attributes=True)
 
 
+@router.get("/conversations", response_model=list[AdminConversationOut])
+async def list_conversations(db: AsyncSession = Depends(get_db)) -> list[AdminConversationOut]:
+    stmt = (
+        select(Conversation)
+        .options(selectinload(Conversation.participants), selectinload(Conversation.messages))
+        .order_by(Conversation.updated_at.desc())
+    )
+    conversations = (await db.execute(stmt)).scalars().all()
+    return [
+        AdminConversationOut(
+            id=c.id,
+            type=c.type,
+            name=c.name,
+            created_by=c.created_by,
+            created_at=c.created_at,
+            participant_count=len(c.participants),
+            message_count=len(c.messages),
+        )
+        for c in conversations
+    ]
+
+
+@router.get("/conversations/{conversation_id}/messages", response_model=list[AdminMessageOut])
+async def get_conversation_messages(
+    conversation_id: str, db: AsyncSession = Depends(get_db)
+) -> list[AdminMessageOut]:
+    stmt = (
+        select(Message)
+        .where(Message.conversation_id == conversation_id)
+        .options(selectinload(Message.sender))
+        .order_by(Message.created_at.asc())
+    )
+    messages = (await db.execute(stmt)).scalars().all()
+    return [
+        AdminMessageOut(
+            id=m.id,
+            sender_id=m.sender_id,
+            sender_display_name=m.sender.display_name,
+            content=m.content,
+            created_at=m.created_at,
+        )
+        for m in messages
+    ]
+
+
+@router.delete("/conversations/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_conversation(conversation_id: str, db: AsyncSession = Depends(get_db)) -> None:
+    conversation = (
+        await db.execute(select(Conversation).where(Conversation.id == conversation_id))
+    ).scalar_one_or_none()
+    if conversation is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+    await db.delete(conversation)
+    await db.commit()
+
+
 @router.get("/tasks", response_model=list[AdminTaskOut])
-async def list_all_tasks(
-    workspace_id: str,
-    owner_id: str | None = None,
-    limit: int = Query(default=100, ge=1, le=500),
-    offset: int = Query(default=0, ge=0),
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_admin),
-) -> list[AdminTaskOut]:
-    await require_support_scope(db, current_user, workspace_id, "personal_data:read")
+async def list_all_tasks(owner_id: str | None = None, db: AsyncSession = Depends(get_db)) -> list[AdminTaskOut]:
     stmt = (
         select(Task)
         .options(selectinload(Task.owner), selectinload(Task.conversation))
-        .where(Task.workspace_id == workspace_id)
         .order_by(Task.created_at.desc())
     )
     if owner_id:
         stmt = stmt.where(Task.owner_id == owner_id)
-    tasks = (await db.execute(stmt.offset(offset).limit(limit))).scalars().all()
+    tasks = (await db.execute(stmt)).scalars().all()
     return [
         AdminTaskOut(
             id=t.id,
-            workspace_id=t.workspace_id,
             conversation_id=t.conversation_id,
             title=t.title,
             due_at=t.due_at,
@@ -159,7 +182,6 @@ async def list_all_tasks(
             status=t.status,
             source=t.source,
             created_at=t.created_at,
-            updated_at=t.updated_at,
             owner_id=t.owner_id,
             owner_email=t.owner.email,
             owner_display_name=t.owner.display_name,
@@ -170,54 +192,25 @@ async def list_all_tasks(
 
 
 @router.delete("/tasks/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_task_admin(
-    task_id: str,
-    workspace_id: str,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_admin),
-) -> None:
-    await require_support_scope(db, current_user, workspace_id, "personal_data:manage")
-    task = (
-        await db.execute(select(Task).where(Task.id == task_id, Task.workspace_id == workspace_id))
-    ).scalar_one_or_none()
+async def delete_task_admin(task_id: str, db: AsyncSession = Depends(get_db)) -> None:
+    task = (await db.execute(select(Task).where(Task.id == task_id))).scalar_one_or_none()
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
-    await record_audit_event(
-        db,
-        actor=current_user,
-        action="platform.personal_task_deleted",
-        target_type="task",
-        target_id=task.id,
-        workspace_id=workspace_id,
-        metadata={},
-    )
     await db.delete(task)
     await db.commit()
 
 
 @router.get("/reminders", response_model=list[AdminReminderOut])
 async def list_all_reminders(
-    workspace_id: str,
-    owner_id: str | None = None,
-    limit: int = Query(default=100, ge=1, le=500),
-    offset: int = Query(default=0, ge=0),
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_admin),
+    owner_id: str | None = None, db: AsyncSession = Depends(get_db)
 ) -> list[AdminReminderOut]:
-    await require_support_scope(db, current_user, workspace_id, "personal_data:read")
-    stmt = (
-        select(Reminder)
-        .options(selectinload(Reminder.owner))
-        .where(Reminder.workspace_id == workspace_id)
-        .order_by(Reminder.created_at.desc())
-    )
+    stmt = select(Reminder).options(selectinload(Reminder.owner)).order_by(Reminder.created_at.desc())
     if owner_id:
         stmt = stmt.where(Reminder.owner_id == owner_id)
-    reminders = (await db.execute(stmt.offset(offset).limit(limit))).scalars().all()
+    reminders = (await db.execute(stmt)).scalars().all()
     return [
         AdminReminderOut(
             id=r.id,
-            workspace_id=r.workspace_id,
             title=r.title,
             message=r.message,
             due_at=r.due_at,
@@ -225,7 +218,6 @@ async def list_all_reminders(
             status=r.status,
             source=r.source,
             created_at=r.created_at,
-            updated_at=r.updated_at,
             owner_id=r.owner_id,
             owner_email=r.owner.email if r.owner else None,
             owner_display_name=r.owner.display_name if r.owner else None,
@@ -235,63 +227,25 @@ async def list_all_reminders(
 
 
 @router.delete("/reminders/{reminder_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_reminder_admin(
-    reminder_id: str,
-    workspace_id: str,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_admin),
-) -> None:
-    await require_support_scope(db, current_user, workspace_id, "personal_data:manage")
-    reminder = (
-        await db.execute(
-            select(Reminder).where(Reminder.id == reminder_id, Reminder.workspace_id == workspace_id)
-        )
-    ).scalar_one_or_none()
-    if reminder is None:
+async def delete_reminder_admin(reminder_id: str) -> None:
+    deleted = await reminder_service.admin_delete_reminder(reminder_id)
+    if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Reminder not found")
-    if reminder.status == "scheduled":
-        reminder_service.remove_scheduler_job(reminder.id)
-    await record_audit_event(
-        db,
-        actor=current_user,
-        action="platform.personal_reminder_deleted",
-        target_type="reminder",
-        target_id=reminder_id,
-        workspace_id=workspace_id,
-        metadata={},
-    )
-    await db.delete(reminder)
-    await db.commit()
 
 
 @router.get("/memories", response_model=list[AdminMemoryOut])
-async def list_all_memories(
-    workspace_id: str,
-    owner_id: str | None = None,
-    limit: int = Query(default=100, ge=1, le=500),
-    offset: int = Query(default=0, ge=0),
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_admin),
-) -> list[AdminMemoryOut]:
-    await require_support_scope(db, current_user, workspace_id, "personal_data:read")
-    stmt = (
-        select(Memory)
-        .options(selectinload(Memory.owner))
-        .where(Memory.workspace_id == workspace_id)
-        .order_by(Memory.created_at.desc())
-    )
+async def list_all_memories(owner_id: str | None = None, db: AsyncSession = Depends(get_db)) -> list[AdminMemoryOut]:
+    stmt = select(Memory).options(selectinload(Memory.owner)).order_by(Memory.created_at.desc())
     if owner_id:
         stmt = stmt.where(Memory.owner_id == owner_id)
-    memories = (await db.execute(stmt.offset(offset).limit(limit))).scalars().all()
+    memories = (await db.execute(stmt)).scalars().all()
     return [
         AdminMemoryOut(
             id=m.id,
-            workspace_id=m.workspace_id,
             category=m.category,
             title=m.title,
             detail=m.detail,
             created_at=m.created_at,
-            updated_at=m.updated_at,
             owner_id=m.owner_id,
             owner_email=m.owner.email,
             owner_display_name=m.owner.display_name,
@@ -301,26 +255,9 @@ async def list_all_memories(
 
 
 @router.delete("/memories/{memory_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_memory_admin(
-    memory_id: str,
-    workspace_id: str,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_admin),
-) -> None:
-    await require_support_scope(db, current_user, workspace_id, "personal_data:manage")
-    memory = (
-        await db.execute(select(Memory).where(Memory.id == memory_id, Memory.workspace_id == workspace_id))
-    ).scalar_one_or_none()
+async def delete_memory_admin(memory_id: str, db: AsyncSession = Depends(get_db)) -> None:
+    memory = (await db.execute(select(Memory).where(Memory.id == memory_id))).scalar_one_or_none()
     if memory is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Memory not found")
-    await record_audit_event(
-        db,
-        actor=current_user,
-        action="platform.personal_memory_deleted",
-        target_type="memory",
-        target_id=memory.id,
-        workspace_id=workspace_id,
-        metadata={},
-    )
     await db.delete(memory)
     await db.commit()

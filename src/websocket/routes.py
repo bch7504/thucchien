@@ -2,13 +2,11 @@ import asyncio
 
 import jwt
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-from fastapi.exceptions import HTTPException
 
 from src.auth.security import decode_access_token
 from src.db import session as db_session
 from src.db.models import User
 from src.services import chat_service, proactive_service
-from src.services.authorization_service import require_conversation_access
 from src.websocket.manager import manager
 
 router = APIRouter()
@@ -39,7 +37,7 @@ async def chat_websocket(websocket: WebSocket) -> None:
 
     async with db_session.async_session_maker() as db:
         user = await db.get(User, user_id)
-        if user is None or not user.is_active:
+        if user is None:
             await websocket.close(code=4001)
             return
 
@@ -58,23 +56,14 @@ async def chat_websocket(websocket: WebSocket) -> None:
                 continue
 
             async with db_session.async_session_maker() as db:
-                current_user = await db.get(User, user_id)
                 try:
-                    if current_user is None:
-                        raise HTTPException(status_code=403, detail="Account has been disabled")
-                    await require_conversation_access(db, current_user, conversation_id, "participant")
-                except (HTTPException, ValueError):
-                    await websocket.send_json(
-                        {
-                            "type": "error",
-                            "code": "conversation_access_denied",
-                            "detail": "Conversation access denied",
-                        }
-                    )
+                    await chat_service.assert_participant(db, conversation_id, user_id)
+                except Exception:
+                    await websocket.send_json({"type": "error", "detail": "Not a participant of this conversation"})
                     continue
 
                 message = await chat_service.create_message(db, conversation_id, user_id, content)
-                sender = current_user
+                sender = await db.get(User, user_id)
                 message_out = chat_service.serialize_message(message, sender)
                 participant_ids = await chat_service.get_participant_ids(db, conversation_id)
 

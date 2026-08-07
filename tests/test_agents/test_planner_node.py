@@ -25,7 +25,7 @@ async def test_planner_node_captures_llm_error(monkeypatch):
 
     result = await planner_node({"messages": [HumanMessage(content="hello")]})
 
-    assert result == {"error": "Dịch vụ AI tạm thời không khả dụng. Vui lòng thử lại sau."}
+    assert result == {"error": "boom"}
 
 
 def test_route_after_planner_ends_on_error():

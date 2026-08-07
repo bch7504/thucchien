@@ -19,26 +19,20 @@ export const getConversationMessages = (token, conversationId) =>
 export const deleteConversation = (token, conversationId) =>
   apiFetch(`/admin/conversations/${conversationId}`, { method: 'DELETE', token })
 
-const scopedParams = (workspaceId, ownerId) => {
-  const params = new URLSearchParams({ workspace_id: workspaceId })
-  if (ownerId) params.set('owner_id', ownerId)
-  return params.toString()
-}
+export const listTasks = (token, ownerId) =>
+  apiFetch(`/admin/tasks${ownerId ? `?owner_id=${encodeURIComponent(ownerId)}` : ''}`, { token })
 
-export const listTasks = (token, workspaceId, ownerId) =>
-  apiFetch(`/admin/tasks?${scopedParams(workspaceId, ownerId)}`, { token })
+export const deleteTask = (token, taskId) =>
+  apiFetch(`/admin/tasks/${taskId}`, { method: 'DELETE', token })
 
-export const deleteTask = (token, workspaceId, taskId) =>
-  apiFetch(`/admin/tasks/${taskId}?workspace_id=${encodeURIComponent(workspaceId)}`, { method: 'DELETE', token })
+export const listReminders = (token, ownerId) =>
+  apiFetch(`/admin/reminders${ownerId ? `?owner_id=${encodeURIComponent(ownerId)}` : ''}`, { token })
 
-export const listReminders = (token, workspaceId, ownerId) =>
-  apiFetch(`/admin/reminders?${scopedParams(workspaceId, ownerId)}`, { token })
+export const deleteReminder = (token, reminderId) =>
+  apiFetch(`/admin/reminders/${reminderId}`, { method: 'DELETE', token })
 
-export const deleteReminder = (token, workspaceId, reminderId) =>
-  apiFetch(`/admin/reminders/${reminderId}?workspace_id=${encodeURIComponent(workspaceId)}`, { method: 'DELETE', token })
+export const listMemories = (token, ownerId) =>
+  apiFetch(`/admin/memories${ownerId ? `?owner_id=${encodeURIComponent(ownerId)}` : ''}`, { token })
 
-export const listMemories = (token, workspaceId, ownerId) =>
-  apiFetch(`/admin/memories?${scopedParams(workspaceId, ownerId)}`, { token })
-
-export const deleteMemory = (token, workspaceId, memoryId) =>
-  apiFetch(`/admin/memories/${memoryId}?workspace_id=${encodeURIComponent(workspaceId)}`, { method: 'DELETE', token })
+export const deleteMemory = (token, memoryId) =>
+  apiFetch(`/admin/memories/${memoryId}`, { method: 'DELETE', token })

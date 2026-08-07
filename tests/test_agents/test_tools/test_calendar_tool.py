@@ -1,4 +1,4 @@
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
@@ -11,15 +11,6 @@ from src.services import calendar_service
 
 def _config():
     return {"configurable": {"thread_id": str(uuid4())}}
-
-
-def _agent_input(message):
-    return {"messages": [HumanMessage(content=message)], "user_id": "user-1", "workspace_id": "workspace-1"}
-
-
-def _allow_calendar(monkeypatch):
-    monkeypatch.setattr(calendar_service, "authorize_calendar_access", AsyncMock())
-    monkeypatch.setattr(calendar_service, "broadcast_change", AsyncMock())
 
 
 def _script_tool_call(fake_llm_factory, tool_name: str, args: dict):
@@ -47,7 +38,6 @@ def _script_tool_call(fake_llm_factory, tool_name: str, args: dict):
 
 @pytest.mark.asyncio
 async def test_create_calendar_event_interrupts_then_creates(monkeypatch, fake_llm_factory):
-    _allow_calendar(monkeypatch)
     fake_service = MagicMock()
     fake_service.events.return_value.insert.return_value.execute.return_value = {
         "id": "evt-abc",
@@ -63,7 +53,7 @@ async def test_create_calendar_event_interrupts_then_creates(monkeypatch, fake_l
     monkeypatch.setattr("src.agents.nodes.planner_node.get_llm", lambda: llm)
 
     config = _config()
-    result = await agent_graph.agent.ainvoke(_agent_input("schedule the review"), config)
+    result = await agent_graph.agent.ainvoke({"messages": [HumanMessage(content="schedule the review")]}, config)
 
     interrupts = result.get("__interrupt__")
     assert interrupts is not None
@@ -90,7 +80,7 @@ async def test_create_calendar_event_declined(monkeypatch, fake_llm_factory):
     monkeypatch.setattr("src.agents.nodes.planner_node.get_llm", lambda: llm)
 
     config = _config()
-    await agent_graph.agent.ainvoke(_agent_input("schedule the review"), config)
+    await agent_graph.agent.ainvoke({"messages": [HumanMessage(content="schedule the review")]}, config)
 
     result2 = await agent_graph.agent.ainvoke(Command(resume={"approved": False}), config)
     final = result2["messages"][-1]
@@ -100,7 +90,6 @@ async def test_create_calendar_event_declined(monkeypatch, fake_llm_factory):
 
 @pytest.mark.asyncio
 async def test_update_calendar_event_interrupts_then_updates(monkeypatch, fake_llm_factory):
-    _allow_calendar(monkeypatch)
     fake_service = MagicMock()
     fake_service.events.return_value.patch.return_value.execute.return_value = {
         "id": "evt-1", "summary": "Launch review (moved)", "htmlLink": "https://calendar.google.com/event?eid=evt1",
@@ -113,7 +102,7 @@ async def test_update_calendar_event_interrupts_then_updates(monkeypatch, fake_l
     monkeypatch.setattr("src.agents.nodes.planner_node.get_llm", lambda: llm)
 
     config = _config()
-    result = await agent_graph.agent.ainvoke(_agent_input("move the review"), config)
+    result = await agent_graph.agent.ainvoke({"messages": [HumanMessage(content="move the review")]}, config)
 
     interrupts = result.get("__interrupt__")
     assert interrupts is not None
@@ -128,7 +117,6 @@ async def test_update_calendar_event_interrupts_then_updates(monkeypatch, fake_l
 
 @pytest.mark.asyncio
 async def test_delete_calendar_event_interrupts_then_deletes(monkeypatch, fake_llm_factory):
-    _allow_calendar(monkeypatch)
     fake_service = MagicMock()
     fake_service.events.return_value.delete.return_value.execute.return_value = {}
     monkeypatch.setattr(calendar_service, "get_calendar_service", lambda: fake_service)
@@ -137,7 +125,7 @@ async def test_delete_calendar_event_interrupts_then_deletes(monkeypatch, fake_l
     monkeypatch.setattr("src.agents.nodes.planner_node.get_llm", lambda: llm)
 
     config = _config()
-    result = await agent_graph.agent.ainvoke(_agent_input("cancel the review"), config)
+    result = await agent_graph.agent.ainvoke({"messages": [HumanMessage(content="cancel the review")]}, config)
 
     interrupts = result.get("__interrupt__")
     assert interrupts is not None
@@ -159,7 +147,7 @@ async def test_delete_calendar_event_declined(monkeypatch, fake_llm_factory):
     monkeypatch.setattr("src.agents.nodes.planner_node.get_llm", lambda: llm)
 
     config = _config()
-    await agent_graph.agent.ainvoke(_agent_input("cancel the review"), config)
+    await agent_graph.agent.ainvoke({"messages": [HumanMessage(content="cancel the review")]}, config)
 
     result2 = await agent_graph.agent.ainvoke(Command(resume={"approved": False}), config)
     final = result2["messages"][-1]

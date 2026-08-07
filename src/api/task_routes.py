@@ -2,18 +2,16 @@ import logging
 from datetime import timedelta
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import case, select
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.auth.dependencies import get_current_user
 from src.config import get_settings
-from src.db.models import Conversation, Task, User
+from src.db.models import Task, User
 from src.db.session import get_db
 from src.models.task_schemas import TaskCreateRequest, TaskOut, UpdateTaskStatusRequest
 from src.services import calendar_service, reminder_service
-from src.services.authorization_service import require_conversation_access
-from src.services.workspace_service import resolve_workspace_for_user
 from src.websocket.manager import manager
 
 logger = logging.getLogger(__name__)
@@ -22,21 +20,17 @@ router = APIRouter()
 
 _PRIORITY_RANK = {"High": 0, "Medium": 1, "Low": 2}
 
-def _to_out(task: Task, *, due_at_override=None) -> TaskOut:
-    due_at = due_at_override if due_at_override is not None else task.due_at
-    if due_at is not None and due_at.tzinfo is None:
-        due_at = due_at.replace(tzinfo=ZoneInfo(get_settings().calendar_timezone))
+
+def _to_out(task: Task) -> TaskOut:
     return TaskOut(
         id=task.id,
-        workspace_id=task.workspace_id,
         conversation_id=task.conversation_id,
         title=task.title,
-        due_at=due_at,
+        due_at=task.due_at,
         priority=task.priority,
         status=task.status,
         source=task.source,
         created_at=task.created_at,
-        updated_at=task.updated_at,
     )
 
 
@@ -46,32 +40,19 @@ async def _get_own_task_or_404(task_id: str, current_user: User, db: AsyncSessio
     ).scalar_one_or_none()
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
-    await resolve_workspace_for_user(db, current_user.id, task.workspace_id)
     return task
 
 
 @router.get("/tasks", response_model=list[TaskOut])
 async def list_tasks(
-    workspace_id: str | None = Query(default=None),
-    limit: int = Query(default=200, ge=1, le=500),
-    offset: int = Query(default=0, ge=0),
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
 ) -> list[TaskOut]:
-    workspace = await resolve_workspace_for_user(db, current_user.id, workspace_id)
-    tasks = (
-        await db.execute(
-            select(Task)
-            .where(Task.owner_id == current_user.id, Task.workspace_id == workspace.id)
-            .order_by(
-                Task.due_at.is_(None),
-                Task.due_at.asc(),
-                case((Task.priority == "High", 0), (Task.priority == "Medium", 1), else_=2),
-                Task.created_at.desc(),
-            )
-            .offset(offset)
-            .limit(limit)
-        )
-    ).scalars().all()
+    tasks = (await db.execute(select(Task).where(Task.owner_id == current_user.id))).scalars().all()
+    def _sort_key(t: Task) -> tuple[bool, float, int]:
+        # .timestamp() gives a plain float to sort by - fine for a relative sort ordering.
+        return (t.due_at is None, t.due_at.timestamp() if t.due_at else 0.0, _PRIORITY_RANK.get(t.priority, 1))
+
+    tasks.sort(key=_sort_key)
     return [_to_out(t) for t in tasks]
 
 
@@ -81,15 +62,6 @@ async def create_task(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> TaskOut:
-    workspace = await resolve_workspace_for_user(db, current_user.id, request.workspace_id)
-    if request.conversation_id is not None:
-        await require_conversation_access(db, current_user, request.conversation_id, "viewer")
-        conversation = await db.get(Conversation, request.conversation_id)
-        if conversation is None or conversation.workspace_id != workspace.id:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="conversation_id does not belong to the selected workspace",
-            )
     due_at = request.due_at
     if due_at is not None and due_at.tzinfo is None:
         # Same ambiguity reminder_service/proactive_service already guard against: a naive due_at
@@ -99,20 +71,19 @@ async def create_task(
         # (verified: local Postgres here defaults to Asia/Bangkok, not something this app controls) -
         # explicit is correct everywhere, not just on this machine.
         due_at = due_at.replace(tzinfo=ZoneInfo(get_settings().calendar_timezone))
+
     task = Task(
-        workspace_id=workspace.id,
         owner_id=current_user.id,
         conversation_id=request.conversation_id,
         title=request.title,
         due_at=due_at,
         priority=request.priority,
-        status="pending" if request.source == "manual" else "suggested",
         source=request.source,
     )
     db.add(task)
     await db.commit()
     await db.refresh(task)
-    out = _to_out(task, due_at_override=due_at)
+    out = _to_out(task)
     await manager.broadcast_to_users([current_user.id], {"type": "task_created", "task": out.model_dump(mode="json")})
     return out
 
@@ -134,12 +105,7 @@ async def _add_to_calendar_and_reminder(task: Task, owner_id: str) -> None:
 
     try:
         await reminder_service.schedule_reminder(
-            workspace_id=task.workspace_id,
-            owner_id=owner_id,
-            title=task.title,
-            due_at_iso=start_iso,
-            lead_minutes=30,
-            source="proactive",
+            owner_id=owner_id, title=task.title, due_at_iso=start_iso, lead_minutes=30, source="proactive"
         )
     except Exception:  # noqa: BLE001 - best-effort, must not block the task Accept
         logger.exception("Auto-create reminder for accepted task %s failed", task.id)

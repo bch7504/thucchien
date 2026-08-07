@@ -20,7 +20,6 @@ class AgentState(TypedDict, total=False):
     error: str
     metadata: dict
     user_id: str | None  # id of the user driving this run, for tools that push WS updates to them
-    workspace_id: str | None  # active workspace for tenant-scoped tools
 
     # Tool-calling planner loop (messages, ToolNode, tools_condition all require this).
     messages: Annotated[list[AnyMessage], add_messages]

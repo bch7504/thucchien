@@ -45,29 +45,10 @@ async def test_websocket_send_broadcasts_to_participant(client, auth_headers, ot
     bob = (await client.get("/api/v1/auth/me", headers=other_auth_headers)).json()
     alice_token = auth_headers["Authorization"].split(" ")[1]
     bob_token = other_auth_headers["Authorization"].split(" ")[1]
-    workspace = (
-        await client.post(
-            "/api/v1/workspaces",
-            json={"name": "Realtime Team"},
-            headers=auth_headers,
-        )
-    ).json()
-    member_response = await client.post(
-        f"/api/v1/workspaces/{workspace['id']}/members",
-        json={"email": bob["email"], "role": "member"},
-        headers=auth_headers,
-    )
-    assert member_response.status_code == 201
 
     conv = (
         await client.post(
-            "/api/v1/conversations",
-            json={
-                "type": "direct",
-                "participant_ids": [bob["id"]],
-                "workspace_id": workspace["id"],
-            },
-            headers=auth_headers,
+            "/api/v1/conversations", json={"type": "direct", "participant_ids": [bob["id"]]}, headers=auth_headers
         )
     ).json()
 

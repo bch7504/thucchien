@@ -52,7 +52,7 @@ async def test_google_auth_links_existing_verified_email(client, monkeypatch):
         "/api/v1/auth/register",
         json={"email": "linkme@example.com", "password": "password123", "display_name": "Link Me"},
     )
-    original_user_id = register_resp.json()["id"]
+    original_user_id = register_resp.json()["user"]["id"]
 
     monkeypatch.setattr(
         google_oauth,
@@ -86,7 +86,7 @@ async def test_google_auth_rejects_unverified_email_link(client, monkeypatch):
         lambda token: _claims(sub="google-sub-3", email="unverified@example.com", email_verified=False),
     )
     resp = await client.post("/api/v1/auth/google", json={"id_token": "fake"})
-    assert resp.status_code == 401
+    assert resp.status_code == 409
 
     async with db_session.async_session_maker() as db:
         identity = (

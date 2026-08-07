@@ -25,7 +25,10 @@ export function AuthProvider({ children }) {
   }
 
   const register = async (email, password, display_name) => {
-    return authApi.register({ email, password, display_name })
+    const data = await authApi.register({ email, password, display_name })
+    localStorage.setItem(TOKEN_KEY, data.access_token)
+    setUser(data.user)
+    setToken(data.access_token)
   }
 
   // Handles both first-time signup and returning login transparently (find-or-create on the
@@ -51,7 +54,7 @@ export function AuthProvider({ children }) {
 
   const changePassword = (passwords) => authApi.changePassword(token, passwords)
 
-  const isAdmin = user?.platform_role === 'platform_admin'
+  const isAdmin = user?.role === 'admin'
 
   return (
     <AuthContext.Provider

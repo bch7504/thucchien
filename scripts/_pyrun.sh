@@ -1,33 +1,37 @@
 #!/usr/bin/env bash
 # Cross-platform Python launcher for AI log hooks.
-# Resolve project virtual environments from this script's location first, then
-# fall back to validated interpreters on PATH.
-# Usage: bash scripts/_pyrun.sh <script> [args...]
+# Tries python3 → python → py -3 on PATH; on Windows, falls back to common
+# Python install locations because Git Bash launched by some hooks gets a
+# stripped PATH that omits the Windows Python directory.
+# Designed to be sourced or called as: bash scripts/_pyrun.sh <script> [args...]
+#
+# Exits 0 silently if no Python is found — hooks must never block the AI tool.
 set -u
 
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
-
-for candidate in \
-  "$REPO_ROOT/.venv/Scripts/python.exe" \
-  "$REPO_ROOT/.venv/bin/python" \
-  "$REPO_ROOT/.ai-log/.venv/Scripts/python.exe" \
-  "$REPO_ROOT/.ai-log/.venv/bin/python"; do
-  if [ -x "$candidate" ] && "$candidate" -c "import sys" >/dev/null 2>&1; then
-    exec "$candidate" "$@"
-  fi
-done
-
-for candidate in python3 python; do
-  if command -v "$candidate" >/dev/null 2>&1 \
-    && "$candidate" -c "import sys" >/dev/null 2>&1; then
-    exec "$candidate" "$@"
-  fi
-done
-
-if command -v py >/dev/null 2>&1 && py -3 -c "import sys" >/dev/null 2>&1; then
-  exec py -3 "$@"
+if [ -x ".venv/Scripts/python.exe" ]; then
+  PY=".venv/Scripts/python.exe"
+elif [ -x ".venv/bin/python" ]; then
+  PY=".venv/bin/python"
+elif command -v python3 >/dev/null 2>&1; then
+  PY=python3
+elif command -v python >/dev/null 2>&1; then
+  PY=python
+elif command -v py >/dev/null 2>&1; then
+  PY="py -3"
+else
+  # PATH lookup failed — probe standard Windows install locations.
+  PY=""
+  shopt -s nullglob 2>/dev/null || true
+  for cand in \
+    /c/Users/*/AppData/Local/Programs/Python/Python*/python.exe \
+    "/c/Program Files/Python"*/python.exe \
+    "/c/Program Files (x86)/Python"*/python.exe \
+    /c/Python*/python.exe; do
+    if [ -x "$cand" ]; then PY="$cand"; break; fi
+  done
+  shopt -u nullglob 2>/dev/null || true
+  [ -n "$PY" ] || exit 0
 fi
 
-printf '%s\n' 'AI log hook: no usable Python interpreter was found.' >&2
-exit 0
+# shellcheck disable=SC2086
+exec $PY "$@"

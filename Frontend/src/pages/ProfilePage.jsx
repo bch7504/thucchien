@@ -1,15 +1,12 @@
 import { useState } from 'react'
 import PageHeader from '../components/common/PageHeader'
 import SettingsSection from '../components/profile/SettingsSection'
-import SupportGrantPanel from '../components/workspace/SupportGrantPanel'
 import { useAuth } from '../context/AuthContext'
-import { useWorkspace } from '../context/WorkspaceContext'
 
 const DEFAULT_PREFS = { language: 'English', default_reminder_lead: '30 minutes before', desktop_notifications: true, email_digest: true, ai_suggestion_alerts: false, permission_scope: '20 latest messages', ai_response_detail: 'Balanced', personalized_suggestions: true }
 
 export default function ProfilePage(){
   const { user, updateProfile, changePassword } = useAuth()
-  const { workspace, workspaceId } = useWorkspace()
   const [form, setForm] = useState(() => ({ display_name: user?.display_name || '', job_title: user?.job_title || '', timezone: user?.timezone || 'Asia/Ho_Chi_Minh', ...DEFAULT_PREFS, ...(user?.preferences || {}) }))
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -52,7 +49,6 @@ export default function ProfilePage(){
       <SettingsSection icon="bi-bell" title="Notifications" description="Choose where and when you want to be notified."><SettingToggle title="Desktop notifications" detail="Tasks, reminders, and mentions" checked={form.desktop_notifications} onChange={set('desktop_notifications')}/><SettingToggle title="Email digest" detail="A daily summary delivered at 8:00 AM" checked={form.email_digest} onChange={set('email_digest')}/><SettingToggle title="AI suggestion alerts" detail="When Orbit finds a new task or event" checked={form.ai_suggestion_alerts} onChange={set('ai_suggestion_alerts')}/></SettingsSection>
       <SettingsSection icon="bi-stars" title="AI settings" description="Control Orbit's access and defaults."><div className="form-grid"><label><span>Default permission scope</span><select className="form-select" value={form.permission_scope} onChange={set('permission_scope')}><option>20 latest messages</option><option>50 latest messages</option><option>Unread messages</option></select></label><label><span>AI response detail</span><select className="form-select" value={form.ai_response_detail} onChange={set('ai_response_detail')}><option>Concise</option><option>Balanced</option><option>Detailed</option></select></label></div><SettingToggle title="Personalized suggestions" detail="Use memory to make AI results more relevant" checked={form.personalized_suggestions} onChange={set('personalized_suggestions')}/></SettingsSection>
       <SettingsSection icon="bi-shield-lock" title="Security" description="Keep your account safe."><div className="security-row"><div><strong>Change password</strong><p>{pwStatus || 'Choose a new password for your account.'}</p></div></div><div className="form-grid"><label><span>Current password</span><input type="password" className="form-control" value={pw.current_password} onChange={e=>setPw(p=>({...p,current_password:e.target.value}))}/></label><label><span>New password</span><input type="password" className="form-control" value={pw.new_password} onChange={e=>setPw(p=>({...p,new_password:e.target.value}))}/></label></div><button className="btn btn-light mt-2" onClick={submitPassword} disabled={pwSaving || !pw.current_password || pw.new_password.length<6}>{pwSaving?'Updating...':'Update password'}</button></SettingsSection>
-      <SupportGrantPanel workspaceId={workspaceId} canApprove={workspace?.current_user_role === 'owner'} />
     </div></div></div>
 }
 

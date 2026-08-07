@@ -1,8 +1,6 @@
-import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
 
-from fastapi import HTTPException, status
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
@@ -11,7 +9,6 @@ from googleapiclient.errors import HttpError
 from src.config import get_settings
 from src.db import session as db_session
 from src.db.models import CalendarSyncState
-from src.services.workspace_service import list_workspace_user_ids, resolve_workspace_for_user
 from src.websocket.manager import manager
 
 logger = logging.getLogger(__name__)
@@ -90,28 +87,12 @@ def delete_event(event_id: str) -> None:
     service.events().delete(calendarId=settings.google_calendar_id, eventId=event_id).execute()
 
 
-async def authorize_calendar_access(user_id: str, workspace_id: str | None) -> tuple[str, list[str]]:
-    """Authorize the explicitly configured workspace integration and return its recipients.
-
-    This application currently supports one service-account/token integration. Failing closed
-    avoids accidentally exposing that calendar to every tenant until per-workspace OAuth is
-    configured in a future integration layer.
-    """
-    configured_workspace_id = get_settings().google_calendar_workspace_id.strip()
-    if not configured_workspace_id:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Calendar integration is not configured")
-    if not workspace_id or workspace_id != configured_workspace_id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Calendar is not enabled for this workspace")
-    async with db_session.async_session_maker() as db:
-        await resolve_workspace_for_user(db, user_id, workspace_id)
-        recipients = await list_workspace_user_ids(db, workspace_id)
-    return workspace_id, recipients
-
-
-async def broadcast_change(workspace_id: str, event_type: str, payload: dict) -> None:
-    async with db_session.async_session_maker() as db:
-        recipients = await list_workspace_user_ids(db, workspace_id)
-    await manager.broadcast_to_users(recipients, {"type": event_type, "workspace_id": workspace_id, **payload})
+async def broadcast_change(event_type: str, payload: dict) -> None:
+    """Push a calendar change to everyone currently online. The connected Google Calendar is a
+    single shared account (not per-user OAuth), so a change matters to every viewer, not just
+    whoever triggered it - used after create/update/delete from both the REST route and the
+    agent tools (create/update/delete_calendar_event)."""
+    await manager.broadcast_to_users(list(manager.active.keys()), {"type": event_type, **payload})
 
 
 def to_out_dict(event: dict) -> dict:
@@ -161,22 +142,19 @@ async def poll_calendar_changes() -> None:
     the app) and broadcast them to everyone connected - the same WebSocket events the REST routes
     and agent tools already send, so the frontend needs no changes to pick these up. Never raises:
     a failed poll should not crash the scheduler, just retry next interval."""
-    workspace_id = get_settings().google_calendar_workspace_id.strip()
-    if not workspace_id:
-        return
     async with db_session.async_session_maker() as db:
-        state = await db.get(CalendarSyncState, workspace_id)
+        state = await db.get(CalendarSyncState, "default")
         sync_token = state.sync_token if state else None
 
     try:
-        items, next_sync_token = await asyncio.to_thread(_fetch_changes, sync_token)
+        items, next_sync_token = _fetch_changes(sync_token)
     except HttpError as e:
         if sync_token and e.resp.status == 410:
             # Token expired/invalid (e.g. calendar untouched too long) - Google requires starting
             # over with a full sync rather than resuming.
             logger.warning("Calendar sync token expired, resyncing from scratch")
             try:
-                items, next_sync_token = await asyncio.to_thread(_fetch_changes, None)
+                items, next_sync_token = _fetch_changes(None)
             except Exception:
                 logger.exception("Calendar poll full resync failed")
                 return
@@ -189,14 +167,14 @@ async def poll_calendar_changes() -> None:
 
     for event in items:
         if event.get("status") == "cancelled":
-            await broadcast_change(workspace_id, "calendar_event_deleted", {"event_id": event["id"]})
+            await broadcast_change("calendar_event_deleted", {"event_id": event["id"]})
         else:
-            await broadcast_change(workspace_id, "calendar_event_updated", {"event": to_out_dict(event)})
+            await broadcast_change("calendar_event_updated", {"event": to_out_dict(event)})
 
     async with db_session.async_session_maker() as db:
-        state = await db.get(CalendarSyncState, workspace_id)
+        state = await db.get(CalendarSyncState, "default")
         if state is None:
-            state = CalendarSyncState(workspace_id=workspace_id)
+            state = CalendarSyncState(id="default")
             db.add(state)
         state.sync_token = next_sync_token
         await db.commit()

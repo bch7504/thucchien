@@ -23,23 +23,11 @@ def test_looks_like_commitment(text, expected):
 
 
 async def _create_conversation(client, creator_headers, other_headers):
-    other = (await client.get("/api/v1/auth/me", headers=other_headers)).json()
-    workspace = (
-        await client.post("/api/v1/workspaces", json={"name": "Proactive test team"}, headers=creator_headers)
-    ).json()
-    add_member = await client.post(
-        f"/api/v1/workspaces/{workspace['id']}/members",
-        json={"email": other["email"], "role": "member"},
-        headers=creator_headers,
-    )
-    assert add_member.status_code == 201
+    other_id = (await client.get("/api/v1/auth/me", headers=other_headers)).json()["id"]
     conv = await client.post(
-        "/api/v1/conversations",
-        json={"type": "direct", "participant_ids": [other["id"]], "workspace_id": workspace["id"]},
-        headers=creator_headers,
+        "/api/v1/conversations", json={"type": "direct", "participant_ids": [other_id]}, headers=creator_headers
     )
-    assert conv.status_code == 200
-    return conv.json()["id"], workspace["id"]
+    return conv.json()["id"]
 
 
 async def _grant_ai_permission(client, conversation_id, headers):
@@ -64,7 +52,7 @@ async def test_maybe_suggest_task_skips_when_ai_permission_not_granted(
     monkeypatch.setattr(proactive_service, "get_llm", lambda: fake_llm)
 
     sender_id = (await client.get("/api/v1/auth/me", headers=auth_headers)).json()["id"]
-    conversation_id, _ = await _create_conversation(client, auth_headers, other_auth_headers)
+    conversation_id = await _create_conversation(client, auth_headers, other_auth_headers)
     # Permission was never granted for this conversation - default deny.
 
     await proactive_service.maybe_suggest_task(
@@ -86,7 +74,7 @@ async def test_maybe_suggest_task_creates_suggested_task(client, auth_headers, o
     monkeypatch.setattr(proactive_service, "get_llm", lambda: fake_llm)
 
     sender_id = (await client.get("/api/v1/auth/me", headers=auth_headers)).json()["id"]
-    conversation_id, workspace_id = await _create_conversation(client, auth_headers, other_auth_headers)
+    conversation_id = await _create_conversation(client, auth_headers, other_auth_headers)
     await _grant_ai_permission(client, conversation_id, auth_headers)
 
     await proactive_service.maybe_suggest_task(
@@ -99,7 +87,6 @@ async def test_maybe_suggest_task_creates_suggested_task(client, auth_headers, o
     assert tasks[0].title == "Gửi báo cáo"
     assert tasks[0].source == "proactive"
     assert tasks[0].status == "suggested"
-    assert tasks[0].workspace_id == workspace_id
 
 
 @pytest.mark.asyncio
@@ -111,7 +98,7 @@ async def test_maybe_suggest_task_no_op_when_llm_says_no_commitment(
     monkeypatch.setattr(proactive_service, "get_llm", lambda: fake_llm)
 
     sender_id = (await client.get("/api/v1/auth/me", headers=auth_headers)).json()["id"]
-    conversation_id, _ = await _create_conversation(client, auth_headers, other_auth_headers)
+    conversation_id = await _create_conversation(client, auth_headers, other_auth_headers)
     await _grant_ai_permission(client, conversation_id, auth_headers)
 
     await proactive_service.maybe_suggest_task(
@@ -134,7 +121,7 @@ async def test_maybe_suggest_task_skips_llm_when_over_budget(client, auth_header
     monkeypatch.setattr(proactive_service.usage_service, "is_over_budget", _over_budget)
 
     sender_id = (await client.get("/api/v1/auth/me", headers=auth_headers)).json()["id"]
-    conversation_id, _ = await _create_conversation(client, auth_headers, other_auth_headers)
+    conversation_id = await _create_conversation(client, auth_headers, other_auth_headers)
     await _grant_ai_permission(client, conversation_id, auth_headers)
 
     await proactive_service.maybe_suggest_task(
@@ -154,7 +141,7 @@ async def test_maybe_suggest_task_never_raises_on_llm_error(client, auth_headers
     monkeypatch.setattr(proactive_service, "get_llm", lambda: fake_llm)
 
     sender_id = (await client.get("/api/v1/auth/me", headers=auth_headers)).json()["id"]
-    conversation_id, _ = await _create_conversation(client, auth_headers, other_auth_headers)
+    conversation_id = await _create_conversation(client, auth_headers, other_auth_headers)
     await _grant_ai_permission(client, conversation_id, auth_headers)
 
     await proactive_service.maybe_suggest_task(

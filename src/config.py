@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -29,18 +29,15 @@ class Settings(BaseSettings):
     llm_temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     daily_token_budget: int = Field(default=200_000, ge=0)
 
-    # Database
-    database_url: str = "sqlite:///./data/app.db"
-    db_pool_size: int = Field(default=10, ge=1, le=100)
-    db_max_overflow: int = Field(default=20, ge=0, le=200)
-    db_pool_timeout_seconds: int = Field(default=30, ge=1, le=300)
+    # Database — PostgreSQL only, no SQLite fallback. Required: no default, so a missing/misconfigured
+    # DATABASE_URL fails fast at startup instead of silently falling back to a file-based DB.
+    database_url: str
 
     # Auth
     secret_key: str = "dev-insecure-secret-change-me"
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 1440
     initial_admin_email: str = ""
-    bootstrap_owner_user_id: str = ""
     # "Sign in with Google" - Web application OAuth Client ID (audience for ID-token verification).
     # Distinct from google_credentials_path/google_token_path below (those are for the Calendar
     # integration's single shared Desktop-app token, unrelated to per-user login). No client secret
@@ -54,7 +51,6 @@ class Settings(BaseSettings):
     google_credentials_path: str = "./secrets/credentials.json"
     google_token_path: str = "./secrets/token.json"
     google_calendar_id: str = "primary"
-    google_calendar_workspace_id: str = ""
     calendar_timezone: str = "Asia/Ho_Chi_Minh"
 
     # Reminders / scheduler
@@ -63,25 +59,6 @@ class Settings(BaseSettings):
     # Calendar polling (no public HTTPS URL yet for Google's real push/webhook channels, so
     # changes made directly in Google Calendar are picked up by polling with a syncToken instead)
     calendar_poll_interval_seconds: int = Field(default=20, ge=5)
-
-    @model_validator(mode="after")
-    def validate_production_settings(self) -> "Settings":
-        if self.app_env != "production":
-            return self
-        if len(self.secret_key.encode("utf-8")) < 32 or "change-me" in self.secret_key:
-            raise ValueError("SECRET_KEY must contain at least 32 bytes of non-placeholder data in production")
-        if self.database_url.startswith("sqlite"):
-            raise ValueError("Production requires PostgreSQL; SQLite is supported only for development and tests")
-        origins = {origin.strip() for origin in self.cors_origins.split(",") if origin.strip()}
-        if not origins or "*" in origins:
-            raise ValueError("CORS_ORIGINS must explicitly list trusted origins in production")
-        if self.llm_provider == "google" and not self.google_api_key:
-            raise ValueError("GOOGLE_API_KEY is required when LLM_PROVIDER=google in production")
-        if self.llm_provider == "groq" and not self.groq_api_key:
-            raise ValueError("GROQ_API_KEY is required when LLM_PROVIDER=groq in production")
-        if self.llm_provider == "openai" and not self.openai_api_key:
-            raise ValueError("OPENAI_API_KEY is required when LLM_PROVIDER=openai in production")
-        return self
 
 
 @lru_cache

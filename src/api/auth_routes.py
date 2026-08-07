@@ -20,7 +20,6 @@ from src.models.auth_schemas import (
     UpdateProfileRequest,
     UserPublic,
 )
-from src.services.workspace_service import create_personal_workspace
 
 router = APIRouter()
 
@@ -31,7 +30,6 @@ def _to_public(user: User) -> UserPublic:
         email=user.email,
         display_name=user.display_name,
         role=user.role,
-        platform_role=user.platform_role,
         job_title=user.job_title,
         timezone=user.timezone,
         preferences=user.preferences,
@@ -45,37 +43,31 @@ def _initial_role_for(email: str) -> str:
     return "admin" if initial_admin_email and email.lower() == initial_admin_email else "user"
 
 
-@router.post("/register", response_model=UserPublic, status_code=status.HTTP_201_CREATED)
-async def register(request: RegisterRequest, db: AsyncSession = Depends(get_db)) -> UserPublic:
-    normalized_email = str(request.email).lower()
-    existing = (await db.execute(select(User).where(User.email == normalized_email))).scalar_one_or_none()
+@router.post("/register", response_model=AuthResponse)
+async def register(request: RegisterRequest, db: AsyncSession = Depends(get_db)) -> AuthResponse:
+    existing = (await db.execute(select(User).where(User.email == request.email))).scalar_one_or_none()
     if existing is not None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered")
 
-    role = _initial_role_for(normalized_email)
     user = User(
-        email=normalized_email,
+        email=request.email,
         password_hash=hash_password(request.password),
         display_name=request.display_name,
-        role=role,
-        platform_role="platform_admin" if role == "admin" else "user",
+        role=_initial_role_for(request.email),
     )
     db.add(user)
-    await db.flush()
-    await create_personal_workspace(db, user)
     await db.commit()
     await db.refresh(user)
 
-    return _to_public(user)
+    token = create_access_token(user.id)
+    return AuthResponse(access_token=token, user=_to_public(user))
 
 
 @router.post("/login", response_model=AuthResponse)
 async def login(request: LoginRequest, db: AsyncSession = Depends(get_db)) -> AuthResponse:
-    user = (await db.execute(select(User).where(User.email == request.email.lower()))).scalar_one_or_none()
+    user = (await db.execute(select(User).where(User.email == request.email))).scalar_one_or_none()
     if user is None or not verify_password(request.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
-    if not user.is_active:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account has been disabled")
 
     token = create_access_token(user.id)
     return AuthResponse(access_token=token, user=_to_public(user))
@@ -94,8 +86,6 @@ async def google_auth(request: GoogleAuthRequest, db: AsyncSession = Depends(get
     google_sub = claims["sub"]
     email = claims.get("email", "").lower()
     email_verified = claims.get("email_verified", False)
-    if not email or not email_verified:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Google email is not verified")
 
     identity = (
         await db.execute(select(GoogleIdentity).where(GoogleIdentity.google_sub == google_sub))
@@ -113,7 +103,6 @@ async def google_auth(request: GoogleAuthRequest, db: AsyncSession = Depends(get
                 detail="Email not verified by Google; sign in with your password instead",
             )
         if user is None:
-            role = _initial_role_for(email)
             user = User(
                 email=email,
                 # Unusable, never-shared password - password_hash stays NOT NULL without adding a
@@ -121,12 +110,10 @@ async def google_auth(request: GoogleAuthRequest, db: AsyncSession = Depends(get
                 # (correct: nobody ever set a password for it) until/unless they set one later.
                 password_hash=hash_password(secrets.token_urlsafe(32)),
                 display_name=claims.get("name") or email.split("@")[0],
-                role=role,
-                platform_role="platform_admin" if role == "admin" else "user",
+                role=_initial_role_for(email),
             )
             db.add(user)
             await db.flush()
-            await create_personal_workspace(db, user)
         db.add(GoogleIdentity(user_id=user.id, google_sub=google_sub, email=email))
         await db.commit()
         await db.refresh(user)

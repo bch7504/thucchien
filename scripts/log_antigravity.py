@@ -4,8 +4,7 @@ Antigravity IDE log scanner — extracts the exact user-typed prompts from
 local Antigravity conversation transcripts.
 
 Source of truth:
-    ~/.gemini/antigravity-ide/brain/<conv_id>/.system_generated/logs/overview.txt
-    (falling back to transcript.jsonl when overview.txt is unavailable)
+    ~/.gemini/antigravity-ide/brain/<conv_id>/.system_generated/logs/transcript.jsonl
     (with fallback to the legacy ~/.gemini/antigravity/brain/... layout)
 
 Each transcript line is a JSON object. We emit one log entry per line where
@@ -45,7 +44,7 @@ import os
 import re
 import subprocess
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 # Fix Windows console encoding so VN diacritics in prompts print cleanly.
@@ -212,10 +211,9 @@ def iter_user_inputs(brain_dirs: list[Path], cutoff: datetime | None,
                 continue
             if only_conv and conv_dir.name != only_conv:
                 continue
-            logs_dir = conv_dir / ".system_generated" / "logs"
-            transcript = logs_dir / "overview.txt"
-            if not transcript.exists():
-                transcript = logs_dir / "transcript.jsonl"
+            transcript = (
+                conv_dir / ".system_generated" / "logs" / "transcript.jsonl"
+            )
             if not transcript.exists() or transcript.stat().st_size == 0:
                 continue
 

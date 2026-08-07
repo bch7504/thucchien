@@ -22,16 +22,9 @@ def _midnight_local_as_utc() -> datetime:
     return datetime.now(tz).replace(hour=0, minute=0, second=0, microsecond=0).astimezone(UTC)
 
 
-async def log_usage(
-    *,
-    provider: str,
-    model: str,
-    usage_metadata: dict | None,
-    user_id: str | None = None,
-    workspace_id: str | None = None,
-) -> None:
+async def log_usage(*, provider: str, model: str, usage_metadata: dict | None) -> None:
     """Best-effort token usage logging. Never lets a logging failure break the chat turn."""
-    if not isinstance(usage_metadata, dict) or not usage_metadata:
+    if not usage_metadata:
         return
     try:
         tokens = usage_metadata.get("total_tokens", 0)
@@ -44,8 +37,6 @@ async def log_usage(
             before_tokens = before_result.scalar_one()
             db.add(
                 UsageLog(
-                    user_id=user_id,
-                    workspace_id=workspace_id,
                     provider=provider,
                     model=model,
                     prompt_tokens=usage_metadata.get("input_tokens", 0),
@@ -76,9 +67,7 @@ async def _maybe_alert_budget(*, before_tokens: int, after_tokens: int) -> None:
         return
 
     async with db_session.async_session_maker() as db:
-        admin_ids = (
-            await db.execute(select(User.id).where(User.platform_role == "platform_admin", User.is_active.is_(True)))
-        ).scalars().all()
+        admin_ids = (await db.execute(select(User.id).where(User.role == "admin"))).scalars().all()
     if not admin_ids:
         return
     await manager.broadcast_to_users(
@@ -93,15 +82,14 @@ async def _maybe_alert_budget(*, before_tokens: int, after_tokens: int) -> None:
     )
 
 
-async def get_usage_today(workspace_id: str | None = None) -> dict:
+async def get_usage_today() -> dict:
     since = _midnight_local_as_utc()
     async with db_session.async_session_maker() as db:
-        stmt = select(func.coalesce(func.sum(UsageLog.total_tokens), 0), func.count(UsageLog.id)).where(
-            UsageLog.created_at >= since
+        result = await db.execute(
+            select(func.coalesce(func.sum(UsageLog.total_tokens), 0), func.count(UsageLog.id)).where(
+                UsageLog.created_at >= since
+            )
         )
-        if workspace_id:
-            stmt = stmt.where(UsageLog.workspace_id == workspace_id)
-        result = await db.execute(stmt)
         total_tokens, request_count = result.one()
     return {"total_tokens": total_tokens, "request_count": request_count, "since": since}
 

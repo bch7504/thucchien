@@ -31,10 +31,9 @@ dependencies = [
     "google-auth>=2.35.0",
     "google-auth-oauthlib>=1.2.0",
     "apscheduler>=3.10.4",
+    # Database - PostgreSQL only, no SQLite driver (see ARCHITECTURE.md)
     "sqlalchemy>=2.0.0",
-    "aiosqlite>=0.20.0",
-    "alembic>=1.14.0",
-    "asyncpg>=0.30.0",
+    "asyncpg>=0.29.0",
     # Auth
     "pyjwt>=2.9.0",
     "bcrypt>=4.2.0",

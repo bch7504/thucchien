@@ -9,10 +9,6 @@ from src.db.models import CalendarSyncState
 from src.services import calendar_service
 
 
-def _enable_calendar(monkeypatch, workspace_id):
-    monkeypatch.setattr(calendar_service.get_settings(), "google_calendar_workspace_id", workspace_id)
-
-
 @pytest.mark.asyncio
 async def test_list_events_requires_auth(client):
     resp = await client.get("/api/v1/calendar/events")
@@ -20,8 +16,7 @@ async def test_list_events_requires_auth(client):
 
 
 @pytest.mark.asyncio
-async def test_list_events_maps_google_events(client, auth_headers, personal_workspace, monkeypatch):
-    _enable_calendar(monkeypatch, personal_workspace["id"])
+async def test_list_events_maps_google_events(client, auth_headers, monkeypatch):
     monkeypatch.setattr(
         calendar_service,
         "list_events",
@@ -36,9 +31,7 @@ async def test_list_events_maps_google_events(client, auth_headers, personal_wor
         ],
     )
 
-    resp = await client.get(
-        f"/api/v1/calendar/events?workspace_id={personal_workspace['id']}", headers=auth_headers
-    )
+    resp = await client.get("/api/v1/calendar/events", headers=auth_headers)
     assert resp.status_code == 200
     body = resp.json()
     assert len(body) == 1
@@ -49,24 +42,18 @@ async def test_list_events_maps_google_events(client, auth_headers, personal_wor
 
 
 @pytest.mark.asyncio
-async def test_list_events_upstream_error_returns_502(
-    client, auth_headers, personal_workspace, monkeypatch
-):
-    _enable_calendar(monkeypatch, personal_workspace["id"])
+async def test_list_events_upstream_error_returns_502(client, auth_headers, monkeypatch):
     def _boom(time_min, time_max, max_results=50):
         raise RuntimeError("token expired")
 
     monkeypatch.setattr(calendar_service, "list_events", _boom)
 
-    resp = await client.get(
-        f"/api/v1/calendar/events?workspace_id={personal_workspace['id']}", headers=auth_headers
-    )
+    resp = await client.get("/api/v1/calendar/events", headers=auth_headers)
     assert resp.status_code == 502
 
 
 @pytest.mark.asyncio
-async def test_create_event(client, auth_headers, personal_workspace, monkeypatch):
-    _enable_calendar(monkeypatch, personal_workspace["id"])
+async def test_create_event(client, auth_headers, monkeypatch):
     captured = {}
 
     def _fake_create(summary, start_iso, end_iso, description="", attendees=None):
@@ -85,12 +72,7 @@ async def test_create_event(client, auth_headers, personal_workspace, monkeypatc
 
     resp = await client.post(
         "/api/v1/calendar/events",
-        json={
-            "workspace_id": personal_workspace["id"],
-            "summary": "Design sync",
-            "start_iso": "2026-08-11T09:00:00+07:00",
-            "end_iso": "2026-08-11T09:30:00+07:00",
-        },
+        json={"summary": "Design sync", "start_iso": "2026-08-11T09:00:00+07:00", "end_iso": "2026-08-11T09:30:00+07:00"},
         headers=auth_headers,
     )
     assert resp.status_code == 201
@@ -101,13 +83,9 @@ async def test_create_event(client, auth_headers, personal_workspace, monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_poll_calendar_changes_bootstrap_broadcasts_and_stores_token(
-    client, personal_workspace, monkeypatch
-):
+async def test_poll_calendar_changes_bootstrap_broadcasts_and_stores_token(client, monkeypatch):
     """No stored sync token yet: should do a bootstrap listing, broadcast whatever it finds, and
     save the returned nextSyncToken for the next (incremental) poll."""
-    workspace_id = personal_workspace["id"]
-    _enable_calendar(monkeypatch, workspace_id)
     fake_service = MagicMock()
     fake_service.events.return_value.list.return_value.execute.return_value = {
         "items": [
@@ -129,26 +107,22 @@ async def test_poll_calendar_changes_bootstrap_broadcasts_and_stores_token(
     call_kwargs = fake_service.events.return_value.list.call_args.kwargs
     assert "syncToken" not in call_kwargs
     assert "timeMin" in call_kwargs
-    broadcast.assert_awaited_once_with(workspace_id, "calendar_event_updated", {"event": {
+    broadcast.assert_awaited_once_with("calendar_event_updated", {"event": {
         "id": "evt-1", "title": "Team sync",
         "start": "2026-08-10T10:00:00+07:00", "end": "2026-08-10T10:30:00+07:00", "url": None,
     }})
 
     async with db_session.async_session_maker() as db:
-        state = await db.get(CalendarSyncState, workspace_id)
+        state = await db.get(CalendarSyncState, "default")
         assert state.sync_token == "token-123"
 
 
 @pytest.mark.asyncio
-async def test_poll_calendar_changes_incremental_handles_deletion(
-    client, personal_workspace, monkeypatch
-):
+async def test_poll_calendar_changes_incremental_handles_deletion(client, monkeypatch):
     """With a stored sync token, should request an incremental diff and treat a cancelled item
     as a deletion rather than trying to render it as an event."""
-    workspace_id = personal_workspace["id"]
-    _enable_calendar(monkeypatch, workspace_id)
     async with db_session.async_session_maker() as db:
-        db.add(CalendarSyncState(workspace_id=workspace_id, sync_token="old-token"))
+        db.add(CalendarSyncState(id="default", sync_token="old-token"))
         await db.commit()
 
     fake_service = MagicMock()
@@ -164,23 +138,19 @@ async def test_poll_calendar_changes_incremental_handles_deletion(
 
     call_kwargs = fake_service.events.return_value.list.call_args.kwargs
     assert call_kwargs["syncToken"] == "old-token"
-    broadcast.assert_awaited_once_with(workspace_id, "calendar_event_deleted", {"event_id": "evt-2"})
+    broadcast.assert_awaited_once_with("calendar_event_deleted", {"event_id": "evt-2"})
 
     async with db_session.async_session_maker() as db:
-        state = await db.get(CalendarSyncState, workspace_id)
+        state = await db.get(CalendarSyncState, "default")
         assert state.sync_token == "new-token"
 
 
 @pytest.mark.asyncio
-async def test_poll_calendar_changes_expired_token_falls_back_to_full_resync(
-    client, personal_workspace, monkeypatch
-):
+async def test_poll_calendar_changes_expired_token_falls_back_to_full_resync(client, monkeypatch):
     """A 410 from Google means the stored token is no longer valid - the poller must drop it and
     resync from scratch instead of erroring out forever on every future poll."""
-    workspace_id = personal_workspace["id"]
-    _enable_calendar(monkeypatch, workspace_id)
     async with db_session.async_session_maker() as db:
-        db.add(CalendarSyncState(workspace_id=workspace_id, sync_token="stale-token"))
+        db.add(CalendarSyncState(id="default", sync_token="stale-token"))
         await db.commit()
 
     calls = []
@@ -207,5 +177,5 @@ async def test_poll_calendar_changes_expired_token_falls_back_to_full_resync(
     assert "syncToken" not in calls[1]
 
     async with db_session.async_session_maker() as db:
-        state = await db.get(CalendarSyncState, workspace_id)
+        state = await db.get(CalendarSyncState, "default")
         assert state.sync_token == "fresh-token"

@@ -7,14 +7,12 @@ import interactionPlugin from '@fullcalendar/interaction'
 import PageHeader from '../components/common/PageHeader'
 import NewEventModal from '../components/calendar/NewEventModal'
 import { useAuth } from '../context/AuthContext'
-import { useWorkspace } from '../context/WorkspaceContext'
 import { listCalendarEvents, deleteCalendarEvent } from '../api/calendar'
 import { getColor } from '../utils/avatar'
 import { HANOI_TZ, formatDateTime } from '../utils/datetime'
 
 export default function CalendarPage() {
   const { token } = useAuth()
-  const { workspaceId, workspace } = useWorkspace()
   const { subscribe } = useOutletContext()
   const [events, setEvents] = useState([])
   const [loading, setLoading] = useState(true)
@@ -25,14 +23,13 @@ export default function CalendarPage() {
 
   const refresh = () => {
     setLoading(true); setError('')
-    if (!workspaceId) return
-    listCalendarEvents(token, workspaceId)
+    listCalendarEvents(token)
       .then(list => setEvents(list.map(e => ({ ...e, color: getColor(e.id) }))))
       .catch(err => setError(err.detail || 'Could not load Google Calendar events.'))
       .finally(() => setLoading(false))
   }
 
-  useEffect(() => { refresh() }, [token, workspaceId])
+  useEffect(() => { refresh() }, [token])
 
   const upsertEvent = (event) => setEvents(prev => [...prev.filter(e => e.id !== event.id), { ...event, color: getColor(event.id) }])
   const removeEvent = (eventId) => setEvents(prev => prev.filter(e => e.id !== eventId))
@@ -40,16 +37,15 @@ export default function CalendarPage() {
   // Realtime: the connected Google Calendar is shared, so anyone creating/editing/deleting an
   // event (from this UI, another tab, or by asking the agent in chat) is reflected live here.
   useEffect(() => subscribe((data) => {
-    if (data.workspace_id && data.workspace_id !== workspaceId) return
     if (data.type === 'calendar_event_created' || data.type === 'calendar_event_updated') upsertEvent(data.event)
     if (data.type === 'calendar_event_deleted') removeEvent(data.event_id)
-  }), [subscribe, workspaceId])
+  }), [subscribe])
 
   const removeSelected = async () => {
     if (!selected || deleting) return
     setDeleting(true)
     try {
-      await deleteCalendarEvent(token, workspaceId, selected.id)
+      await deleteCalendarEvent(token, selected.id)
       removeEvent(selected.id)
       setSelected(null)
     } catch (err) {
@@ -58,7 +54,7 @@ export default function CalendarPage() {
   }
 
   return <div className="page-container calendar-page">
-    <PageHeader eyebrow="Schedule" title="Calendar" description={`Google Calendar integration for ${workspace?.name || 'the active workspace'}.`} action={<button className="btn btn-primary" onClick={() => setNewEventOpen(true)} disabled={!workspaceId}><i className="bi bi-plus-lg me-2"/>New event</button>}/>
+    <PageHeader eyebrow="Schedule" title="Calendar" description="Your Google Calendar events, all in one place." action={<button className="btn btn-primary" onClick={() => setNewEventOpen(true)}><i className="bi bi-plus-lg me-2"/>New event</button>}/>
     {error && <div className="auth-error mb-3">{error}</div>}
     {loading ? <p className="text-muted small">Loading calendar...</p> : (
       <div className="calendar-layout"><section className="content-card calendar-card"><FullCalendar plugins={[dayGridPlugin,timeGridPlugin,interactionPlugin]} initialView="dayGridMonth" timeZone={HANOI_TZ} headerToolbar={{left:'prev,next today',center:'title',right:'dayGridMonth,timeGridWeek,timeGridDay'}} events={events} eventClick={({event:e})=>setSelected(e)} height="auto"/></section>

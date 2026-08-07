@@ -7,11 +7,11 @@ async def test_register_success(client):
         "/api/v1/auth/register",
         json={"email": "new@example.com", "password": "password123", "display_name": "New User"},
     )
-    assert resp.status_code == 201
+    assert resp.status_code == 200
     body = resp.json()
-    assert "access_token" not in body
-    assert body["email"] == "new@example.com"
-    assert body["display_name"] == "New User"
+    assert body["token_type"] == "bearer"
+    assert body["user"]["email"] == "new@example.com"
+    assert body["user"]["display_name"] == "New User"
 
 
 @pytest.mark.asyncio

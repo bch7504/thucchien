@@ -1,13 +1,11 @@
 import { useEffect, useState } from 'react'
 import { useAuth } from '../../context/AuthContext'
-import { useWorkspace } from '../../context/WorkspaceContext'
 import { createMemory, updateMemory } from '../../api/memories'
 
 const CATEGORIES = ['Work', 'Preference', 'People', 'Language', 'Routine']
 
 export default function MemoryModal({ open, onClose, onSaved, memory = null }) {
   const { token } = useAuth()
-  const { workspaceId } = useWorkspace()
   const [category, setCategory] = useState('Preference')
   const [title, setTitle] = useState('')
   const [detail, setDetail] = useState('')
@@ -31,7 +29,7 @@ export default function MemoryModal({ open, onClose, onSaved, memory = null }) {
     try {
       const saved = memory
         ? await updateMemory(token, memory.id, { category, title: title.trim(), detail: detail.trim() })
-        : await createMemory(token, { workspace_id: workspaceId, category, title: title.trim(), detail: detail.trim() })
+        : await createMemory(token, { category, title: title.trim(), detail: detail.trim() })
       onSaved(saved)
       onClose()
     } catch (err) { setError(err.detail || 'Could not save this memory.') }
