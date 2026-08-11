@@ -38,20 +38,38 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 1440
     initial_admin_email: str = ""
-    # "Sign in with Google" - Web application OAuth Client ID (audience for ID-token verification).
-    # Distinct from google_credentials_path/google_token_path below (those are for the Calendar
-    # integration's single shared Desktop-app token, unrelated to per-user login). No client secret
-    # needed - only ID-token verification, never an authorization-code exchange.
+    # "Sign in with Google" - Web application OAuth Client ID (audience for ID-token verification
+    # only, never an authorization-code exchange, so no client secret needed). Distinct from the
+    # Calendar OAuth client below - two separate Google Cloud OAuth Clients on purpose, so a user
+    # can log in without ever being asked for Calendar access, and vice versa.
     google_oauth_client_id: str = ""
 
     # Vector Store
     chroma_persist_dir: str = "./data/chroma"
 
-    # Google Calendar
-    google_credentials_path: str = "./secrets/credentials.json"
-    google_token_path: str = "./secrets/token.json"
-    google_calendar_id: str = "primary"
+    # Google Calendar - per-user OAuth (each user connects their own Calendar from the Calendar
+    # page via a real redirect + backend callback; there is no shared/fallback calendar). This IS
+    # an authorization-code exchange (to get a refresh_token we can use outside the browser), so
+    # unlike google_oauth_client_id above, this Client needs a secret. Create a separate "Web
+    # application" OAuth Client for this in Google Cloud Console - see .env.example. calendarId is
+    # always "primary" now (credential is already the user's own), so no google_calendar_id setting.
+    google_calendar_client_id: str = ""
+    google_calendar_client_secret: str = ""
+    google_calendar_redirect_uri: str = "http://localhost:8000/api/v1/calendar/oauth/callback"
     calendar_timezone: str = "Asia/Ho_Chi_Minh"
+
+    # Fernet key encrypting refresh_token/access_token at rest (src/auth/crypto.py) - a Calendar
+    # refresh token is a long-lived secret (unlike a password hash, it's directly usable to read/
+    # write someone's calendar until they revoke it), so unlike most other secrets in this app it
+    # gets encrypted, not just kept out of git. Generate with:
+    #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    # Never rotate after users have connected - doing so turns every stored refresh_token into
+    # garbage and forces everyone to reconnect.
+    credential_encryption_key: str = ""
+
+    # Frontend origin, used as postMessage's targetOrigin on the OAuth callback page so only our
+    # own frontend (not an arbitrary embedded/opener page) can receive the "connected" signal.
+    frontend_origin: str = "http://localhost:5173"
 
     # Reminders / scheduler
     scheduler_timezone: str = "Asia/Ho_Chi_Minh"

@@ -16,3 +16,12 @@ export const updateCalendarEvent = (token, eventId, { summary, start_iso, end_is
 
 export const deleteCalendarEvent = (token, eventId) =>
   apiFetch(`/calendar/events/${eventId}`, { method: 'DELETE', token })
+
+export const getCalendarConnection = (token) => apiFetch('/calendar/connection', { token })
+
+// Returns Google's consent-screen URL to open (window.open) - the connection itself finishes
+// server-side at the OAuth callback route, not via any request this frontend makes directly.
+export const getCalendarOAuthUrl = (token) => apiFetch('/calendar/oauth/url', { token })
+
+export const disconnectCalendar = (token) =>
+  apiFetch('/calendar/connection', { method: 'DELETE', token })

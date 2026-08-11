@@ -22,6 +22,12 @@ def _async_url(url: str) -> str:
 # "attached to a different loop". NullPool sidesteps this by opening a fresh connection on every
 # checkout instead of reusing one across loops; production keeps normal pooling.
 _engine_kwargs = {"poolclass": NullPool} if settings.app_env == "test" else {}
+# asyncpg's connect() takes an `ssl` kwarg, not the libpq-style `sslmode` that psycopg (used by the
+# LangGraph checkpointer and the APScheduler jobstore) understands - so SSL can't be configured via
+# a query string on DATABASE_URL without breaking one driver or the other. Set it here instead,
+# scoped to this engine only. "prefer" negotiates SSL when the server offers it (managed Postgres
+# like Supabase) and falls back to plaintext otherwise (local dev, CI's postgres service container).
+_engine_kwargs["connect_args"] = {"ssl": "prefer"}
 engine = create_async_engine(_async_url(settings.database_url), **_engine_kwargs)
 async_session_maker = async_sessionmaker(engine, expire_on_commit=False)
 

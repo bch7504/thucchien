@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from src.agents.graph import close_checkpointer, init_checkpointer
 from src.api.admin_routes import router as admin_router
 from src.api.auth_routes import router as auth_router
+from src.api.calendar_routes import public_router as calendar_public_router
 from src.api.calendar_routes import router as calendar_router
 from src.api.chat_routes import router as chat_router
 from src.api.memory_routes import router as memory_router
@@ -62,6 +63,7 @@ app.include_router(ws_router, prefix="/api/v1", tags=["ws"])
 app.include_router(admin_router, prefix="/api/v1/admin", tags=["admin"])
 app.include_router(task_router, prefix="/api/v1", tags=["tasks"])
 app.include_router(calendar_router, prefix="/api/v1", tags=["calendar"])
+app.include_router(calendar_public_router, prefix="/api/v1", tags=["calendar"])
 app.include_router(reminder_router, prefix="/api/v1", tags=["reminders"])
 app.include_router(memory_router, prefix="/api/v1", tags=["memory"])
 

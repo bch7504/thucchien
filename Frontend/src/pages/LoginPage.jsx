@@ -13,6 +13,10 @@ export default function LoginPage(){const {register,handleSubmit,formState:{erro
 export function GoogleAuthButton({ onError }) {
   const navigate = useNavigate()
   const { loginWithGoogle } = useAuth()
+  // No Client ID configured (VITE_GOOGLE_CLIENT_ID unset) - password login only. Without this
+  // guard <GoogleLogin/> still renders and fails at click time with Google's own confusing
+  // "Missing required parameter: client_id" error instead of just not being there.
+  if (!import.meta.env.VITE_GOOGLE_CLIENT_ID) return null
   return (
     <>
       <div className="auth-divider">or continue with</div>

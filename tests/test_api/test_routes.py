@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from langchain_core.messages import AIMessage, ToolMessage
@@ -99,6 +99,68 @@ async def test_chat_allows_conversation_id_caller_is_a_participant_of(client, au
 
 
 @pytest.mark.asyncio
+async def test_chat_with_scope_queries_db_instead_of_trusting_client_messages(
+    client, auth_headers, other_auth_headers, monkeypatch, fake_llm_factory
+):
+    """`scope` (AIPanel's "Permission scope") makes the server re-derive messages from the DB -
+    proven here by sending NO `messages` at all and backdating one message outside the "today"
+    scope: only the in-scope one may reach the LLM, and its timestamp must be included too."""
+    from datetime import UTC, datetime, timedelta
+
+    from src.db import session as db_session
+    from src.db.models import Message
+
+    other_me = await client.get("/api/v1/auth/me", headers=other_auth_headers)
+    other_id = other_me.json()["id"]
+    conv = await client.post(
+        "/api/v1/conversations", json={"type": "direct", "participant_ids": [other_id]}, headers=auth_headers
+    )
+    conversation_id = conv.json()["id"]
+    await client.put(
+        f"/api/v1/conversations/{conversation_id}/ai-permission", json={"granted": True}, headers=auth_headers
+    )
+    me = await client.get("/api/v1/auth/me", headers=auth_headers)
+    alice_id = me.json()["id"]
+
+    now = datetime.now(UTC)
+    async with db_session.async_session_maker() as db:
+        db.add(
+            Message(
+                conversation_id=conversation_id,
+                sender_id=alice_id,
+                content="two days ago, excluded",
+                created_at=now - timedelta(days=2),
+            )
+        )
+        db.add(
+            Message(conversation_id=conversation_id, sender_id=alice_id, content="today, included", created_at=now)
+        )
+        await db.commit()
+
+    captured = {}
+    reply = AIMessage(content="ok")
+    llm = fake_llm_factory([reply])
+
+    async def ainvoke(messages):
+        captured["messages"] = messages
+        return reply
+
+    llm.ainvoke = ainvoke
+    monkeypatch.setattr("src.agents.nodes.planner_node.get_llm", lambda: llm)
+
+    response = await client.post(
+        "/api/v1/chat",
+        json={"message": "What happened today?", "conversation_id": conversation_id, "scope": {"kind": "today"}},
+        headers=auth_headers,
+    )
+    assert response.status_code == 200
+    system_prompt = captured["messages"][0].content
+    assert "today, included" in system_prompt
+    assert "two days ago, excluded" not in system_prompt
+    assert "[" in system_prompt and "]" in system_prompt  # the timestamp annotation is present
+
+
+@pytest.mark.asyncio
 async def test_chat_completed_response(client, auth_headers):
     response = await client.post("/api/v1/chat", json={"message": "hello"}, headers=auth_headers)
     assert response.status_code == 200
@@ -155,7 +217,7 @@ async def test_chat_interrupts_and_resume_completes(client, auth_headers, monkey
 
     fake_service = MagicMock()
     fake_service.events.return_value.insert.return_value.execute.return_value = {"id": "evt-1"}
-    monkeypatch.setattr(calendar_service, "get_calendar_service", lambda: fake_service)
+    monkeypatch.setattr(calendar_service, "_service", AsyncMock(return_value=fake_service))
 
     def _final_message(state):
         last = state["messages"][-1]
@@ -236,7 +298,7 @@ async def test_chat_resume_not_blocked_by_budget(client, auth_headers, monkeypat
 
     fake_service = MagicMock()
     fake_service.events.return_value.insert.return_value.execute.return_value = {"id": "evt-1"}
-    monkeypatch.setattr(calendar_service, "get_calendar_service", lambda: fake_service)
+    monkeypatch.setattr(calendar_service, "_service", AsyncMock(return_value=fake_service))
 
     def _final_message(state):
         last = state["messages"][-1]

@@ -1,5 +1,5 @@
 from datetime import datetime
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -140,7 +140,7 @@ async def test_accepting_proactive_task_with_due_date_creates_calendar_event_and
     fake_service.events.return_value.insert.return_value.execute.return_value = {
         "id": "evt-1", "htmlLink": "https://calendar.google.com/event?eid=evt1",
     }
-    monkeypatch.setattr(calendar_service, "get_calendar_service", lambda: fake_service)
+    monkeypatch.setattr(calendar_service, "_service", AsyncMock(return_value=fake_service))
 
     created = (
         await client.post(
@@ -168,7 +168,7 @@ async def test_accepting_proactive_task_with_due_date_creates_calendar_event_and
 @pytest.mark.asyncio
 async def test_accepting_manual_task_does_not_touch_calendar_or_reminder(client, auth_headers, monkeypatch):
     fake_service = MagicMock()
-    monkeypatch.setattr(calendar_service, "get_calendar_service", lambda: fake_service)
+    monkeypatch.setattr(calendar_service, "_service", AsyncMock(return_value=fake_service))
 
     created = (
         await client.post(
@@ -190,7 +190,7 @@ async def test_accepting_proactive_task_without_due_date_does_not_touch_calendar
     client, auth_headers, monkeypatch
 ):
     fake_service = MagicMock()
-    monkeypatch.setattr(calendar_service, "get_calendar_service", lambda: fake_service)
+    monkeypatch.setattr(calendar_service, "_service", AsyncMock(return_value=fake_service))
 
     created = (
         await client.post(
@@ -210,10 +210,9 @@ async def test_accepting_proactive_task_without_due_date_does_not_touch_calendar
 async def test_accepting_proactive_task_survives_calendar_failure(client, auth_headers, monkeypatch):
     """Best-effort: a Google Calendar failure must not block the task itself from being accepted."""
 
-    def _broken_get_calendar_service():
-        raise RuntimeError("Google API unreachable")
-
-    monkeypatch.setattr(calendar_service, "get_calendar_service", _broken_get_calendar_service)
+    monkeypatch.setattr(
+        calendar_service, "_service", AsyncMock(side_effect=RuntimeError("Google API unreachable"))
+    )
 
     created = (
         await client.post(

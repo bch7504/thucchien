@@ -60,17 +60,18 @@ async def test_agent_interrupt_then_resume_round_trip(monkeypatch, fake_llm_fact
     llm.ainvoke = ainvoke
     monkeypatch.setattr("src.agents.nodes.planner_node.get_llm", lambda: llm)
 
-    fake_service = None
-    from unittest.mock import MagicMock
+    from unittest.mock import AsyncMock, MagicMock
 
     from src.services import calendar_service
 
     fake_service = MagicMock()
     fake_service.events.return_value.insert.return_value.execute.return_value = {"id": "evt-1"}
-    monkeypatch.setattr(calendar_service, "get_calendar_service", lambda: fake_service)
+    monkeypatch.setattr(calendar_service, "_service", AsyncMock(return_value=fake_service))
 
     config = _config()
-    result = await agent_graph.agent.ainvoke({"messages": [HumanMessage(content="book a sync")]}, config)
+    result = await agent_graph.agent.ainvoke(
+        {"messages": [HumanMessage(content="book a sync")], "user_id": "test-graph-user"}, config
+    )
     assert result["__interrupt__"][0].value["type"] == "calendar_event"
 
     result2 = await agent_graph.agent.ainvoke(Command(resume={"approved": True}), config)

@@ -1,0 +1,68 @@
+# Render Blueprint - see docs/deploy guide for the full manual setup flow (Supabase, Vercel, Google
+# OAuth Console). This only defines the backend web service; the Postgres database lives on
+# Supabase (external, not a Render-managed database), so there is no `databases:` block here.
+services:
+  - type: web
+    name: orbit-backend # URL = <name>.onrender.com - pick this before starting the manual setup
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: free
+    healthCheckPath: /health
+    # deploy.yml (.github/workflows/deploy.yml) is the only deploy path, triggered after CI passes
+    # on main via a Deploy Hook - avoid double-deploying by leaving Render's own auto-deploy off.
+    autoDeployTrigger: off
+    envVars:
+      # --- Fixed, non-secret values ---
+      - key: APP_ENV
+        value: production
+      - key: APP_HOST
+        value: 0.0.0.0
+      - key: LOG_LEVEL
+        value: INFO
+      - key: LLM_PROVIDER
+        value: google
+      - key: MODEL_NAME
+        value: gemini-2.5-flash
+      - key: DAILY_TOKEN_BUDGET
+        value: "200000"
+      - key: JWT_ALGORITHM
+        value: HS256
+      - key: ACCESS_TOKEN_EXPIRE_MINUTES
+        value: "1440"
+      - key: CHROMA_PERSIST_DIR
+        value: ./data/chroma
+      - key: CALENDAR_TIMEZONE
+        value: Asia/Ho_Chi_Minh
+      - key: SCHEDULER_TIMEZONE
+        value: Asia/Ho_Chi_Minh
+      - key: CALENDAR_POLL_INTERVAL_SECONDS
+        value: "20"
+      # --- Secrets / values that differ from dev - entered by hand in the Render dashboard when
+      # applying this Blueprint (sync: false = Render prompts for a value, never stores it here) ---
+      - key: DATABASE_URL
+        sync: false
+      - key: SECRET_KEY
+        sync: false
+      - key: CREDENTIAL_ENCRYPTION_KEY
+        sync: false
+      - key: GOOGLE_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: GOOGLE_OAUTH_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CALENDAR_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CALENDAR_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_CALENDAR_REDIRECT_URI
+        sync: false
+      - key: INITIAL_ADMIN_EMAIL
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+      - key: FRONTEND_ORIGIN
+        sync: false

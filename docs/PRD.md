@@ -118,14 +118,17 @@ dùng rời khỏi app chat và không bao giờ tự ý hành động thay họ
 - [x] `/assistant` chat trực tiếp với agent, giữ `thread_id` xuyên suốt hội thoại.
 - [x] Khi agent trả `status: "interrupted"` → hiện nút **Xác nhận / Huỷ** ngay trong bong bóng chat.
 
-### US-10 — Admin dashboard + cảnh báo token 🟡
+### US-10 — Admin dashboard + cảnh báo token 🟢
 
 - [x] Dashboard: thống kê user/hội thoại/tin nhắn; quản lý user (đổi role, khoá/mở); kiểm duyệt và
       xoá hội thoại; xem/xoá Task, Reminder, Memory toàn hệ thống.
 - [x] Bảng `usage_logs` ghi token mỗi lần gọi LLM (best-effort, không phá luồng chat nếu lỗi).
 - [x] Stat card tổng token + số request hôm nay + % so với `DAILY_TOKEN_BUDGET`; banner đỏ khi ≥80%.
-- [ ] 🟡 Cảnh báo chỉ hiện khi admin **chủ động mở trang** — chưa push/email, chưa tự chặn gọi LLM
-      khi vượt ngân sách.
+- [x] `usage_service._maybe_alert_budget` đẩy WebSocket `usage_budget_alert` tới **mọi admin đang
+      online** ngay khi vượt 80%/100% (không chỉ khi admin chủ động mở trang Admin — hiện qua
+      `BudgetAlertToast` ở bất kỳ trang nào), **và** `usage_service.is_over_budget()` chặn hẳn cuộc
+      gọi LLM mới (`/chat`, proactive detection) một khi đã chạm ngân sách — `/chat/resume` được
+      miễn trừ để không treo `interrupt()` dở dang.
 
 ### US-11 — Xử lý lỗi 🟢
 
@@ -293,10 +296,10 @@ Tất cả dưới prefix `/api/v1`, đều yêu cầu JWT trừ `/auth/register
 **Payload `interrupt()` (human-in-the-loop):** `type` = `calendar_event` | `calendar_event_update` |
 `calendar_event_delete` | `reminder`, kèm `draft` chứa nội dung sẽ được ghi.
 
-**Tool của agent (8 tool trong `ALL_TOOLS`):** `summarize_conversation` · `extract_tasks` ·
-`create_calendar_event` · `list_calendar_events` · `update_calendar_event` · `delete_calendar_event` ·
-`create_reminder` · `list_reminders`. Bốn tool có `interrupt()`: `create/update/delete_calendar_event`
-và `create_reminder`.
+**Tool của agent (9 tool trong `ALL_TOOLS`):** `summarize_conversation` · `extract_tasks` ·
+`search_messages` · `create_calendar_event` · `list_calendar_events` · `update_calendar_event` ·
+`delete_calendar_event` · `create_reminder` · `list_reminders`. Bốn tool có `interrupt()`:
+`create/update/delete_calendar_event` và `create_reminder`.
 
 ## 7. Luồng Agent (LangGraph)
 

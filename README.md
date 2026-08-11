@@ -17,7 +17,7 @@ Dự án AI20K Build Phase: một AI agent nhúng trong ứng dụng chat, giúp
 - **Tóm tắt hội thoại theo yêu cầu**: trong trang Chat, bấm icon AI trên header → **Summarize** — AI đọc tin nhắn thật (theo scope 20/50 tin gần nhất đang chọn) và trả về bản tóm tắt.
 - **Trích xuất Task từ hội thoại**: cùng panel AI → **Extract tasks** — AI tìm việc cần làm/lịch hẹn trong hội thoại, lưu vào trang `/tasks` mục "AI suggestions"; người dùng bấm **Accept**/**Dismiss** để xác nhận. Panel AI còn có **Find schedule**, **Deadlines**, **Suggest reminder** (hiện nút Xác nhận/Huỷ ngay trong panel vì tạo reminder cần human-in-the-loop), cùng ô **Ask Orbit** để hỏi tự do về hội thoại đang xem.
 - **Task Inbox ưu tiên** (`/tasks/inbox`): view tách riêng khỏi danh sách task thường, nhóm việc cần chú ý ngay thành 4 mức — cần quyết định (gợi ý AI chưa Accept/Dismiss), quá hạn, sắp đến hạn trong 48h, và priority cao — thay vì phải tự lọc trong danh sách đầy đủ.
-- **Lịch cá nhân (Google Calendar thật, đồng bộ 2 chiều, realtime)**: trang `/calendar` gọi thẳng Google Calendar API (cần tự cấu hình OAuth — xem `scripts/google_oauth_setup.py`) để xem, tạo, sửa và xoá sự kiện thật. Agent cũng dùng chung API này (`list/create/update/delete_calendar_event` tool) nên có thể quản lý lịch qua chat, không chỉ qua UI. Mọi thay đổi (từ UI, từ chat, hoặc tạo/sửa/xoá trực tiếp trong chính Google Calendar) đều đẩy qua WebSocket tới mọi người đang mở `/calendar` — không cần refresh. Thay đổi từ phía Google được bắt bằng cách polling định kỳ (`CALENDAR_POLL_INTERVAL_SECONDS`, mặc định 20s) chứ chưa dùng webhook thật của Google (cần domain public HTTPS mà project chưa deploy).
+- **Lịch cá nhân (Google Calendar thật, per-user, đồng bộ 2 chiều, realtime)**: trang `/calendar` — mỗi người tự bấm **Connect Google Calendar** (OAuth Client riêng, xem mục "Cách chạy web" bước 2) để nối đúng Google Calendar của chính họ; chưa Connect thì trang chỉ hiện nút mời kết nối, không có sự kiện nào. Sau khi kết nối, xem/tạo/sửa/xoá sự kiện thật trên calendar của người đó. Agent cũng dùng chung API này (`list/create/update/delete_calendar_event` tool, tự biết đang thao tác trên calendar của ai đang chat) nên có thể quản lý lịch qua chat, không chỉ qua UI. Mọi thay đổi (từ UI, từ chat, hoặc tạo/sửa/xoá trực tiếp trong chính Google Calendar) đều đẩy qua WebSocket — chỉ tới đúng người sở hữu calendar đó, không phải mọi người đang mở `/calendar`. Thay đổi từ phía Google được bắt bằng cách polling định kỳ cho từng user **đang online** đã kết nối (`CALENDAR_POLL_INTERVAL_SECONDS`, mặc định 20s) chứ chưa dùng webhook thật của Google (cần domain public HTTPS mà project chưa deploy).
 - **Nhắc nhở bền vững + realtime**: trang `/reminders` tạo nhắc nhở thật, lưu DB, sống sót qua restart server (APScheduler + `SQLAlchemyJobStore`); khi đến giờ, đẩy thông báo realtime qua WebSocket dù đang ở trang nào.
 - **Hồ sơ cá nhân** (`/profile`): sửa tên/chức danh/timezone/tuỳ chọn thông báo và đổi mật khẩu — lưu thật vào database, không còn là dữ liệu mẫu.
 - **Memory cá nhân** (`/memory`): thêm/sửa/xoá "điều Orbit nên nhớ về bạn" (sở thích, thói quen, thông tin người liên quan...), lọc theo danh mục và tìm kiếm — lưu thật vào database.
@@ -93,11 +93,26 @@ cp .env.example .env
 # Sửa DATABASE_URL trỏ vào database Postgres đã tạo ở bước 1 (postgresql://user:pass@host:5432/dbname) — bắt buộc, không có giá trị mặc định.
 # Điền INITIAL_ADMIN_EMAIL nếu muốn tài khoản đăng ký với email đó tự động có quyền admin.
 # Muốn bật nút "Đăng nhập bằng Google": tạo 1 OAuth Client ID loại "Web application" tại
-#   https://console.cloud.google.com/apis/credentials (khác với credential "Desktop app" đang
-#   dùng cho Google Calendar — không dùng chung), Authorized JavaScript origins:
+#   https://console.cloud.google.com/apis/credentials, Authorized JavaScript origins:
 #   http://localhost:5173. Điền Client ID vào GOOGLE_OAUTH_CLIENT_ID ở đây, và giá trị y hệt vào
 #   VITE_GOOGLE_CLIENT_ID trong Frontend/.env (bước 3) — không điền thì nút Google chỉ ẩn/không hoạt
 #   động, các tính năng khác không ảnh hưởng.
+# Muốn bật nút "Connect Google Calendar" (mỗi user tự nối Calendar riêng của họ, xem docs/PER_USER_CALENDAR.md):
+#   1. Bật "Google Calendar API" tại https://console.cloud.google.com — APIs & Services → Library.
+#   2. OAuth consent screen: thêm scope https://www.googleapis.com/auth/calendar, thêm email từng
+#      người sẽ test vào "Test users" (scope nhạy cảm nên app ở chế độ Testing, tối đa 100 test
+#      user, ai không có trong danh sách sẽ gặp lỗi access_denied).
+#   3. Credentials → Create Credentials → OAuth client ID → Web application (KHÁC client đăng nhập
+#      ở trên — client này cần đổi authorization code lấy refresh token nên phải có Client Secret).
+#   4. Authorized redirect URIs: thêm ĐÚNG http://localhost:8000/api/v1/calendar/oauth/callback
+#      (đây là redirect thật, không phải popup — phải khớp từng ký tự với GOOGLE_CALENDAR_REDIRECT_URI).
+# Điền GOOGLE_CALENDAR_CLIENT_ID + GOOGLE_CALENDAR_CLIENT_SECRET ở đây — không cần điền gì ở
+#   Frontend/.env (khác với nút đăng nhập ở trên, nút Connect Calendar không cần biến VITE_* nào,
+#   toàn bộ OAuth chạy ở backend). Cũng cần CREDENTIAL_ENCRYPTION_KEY (mã hoá refresh token trước
+#   khi lưu DB) — sinh 1 lần bằng:
+#     python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+#   Không điền GOOGLE_CALENDAR_CLIENT_ID/SECRET thì nút Connect vẫn hiện nhưng bấm vào báo lỗi rõ
+#   ràng thay vì mở được màn hình Google; các tính năng khác không ảnh hưởng.
 
 # Chạy server
 uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
@@ -119,7 +134,7 @@ npm install
 npm run dev
 ```
 
-Mở `http://localhost:5173` trong trình duyệt. Frontend mặc định gọi backend tại `http://localhost:8000/api/v1` — nếu backend chạy ở địa chỉ khác, tạo file `Frontend/.env` từ `Frontend/.env.example` và sửa `VITE_API_BASE_URL`/`VITE_WS_BASE_URL`. Muốn bật nút "Đăng nhập bằng Google" thì cũng cần tạo `Frontend/.env` và điền `VITE_GOOGLE_CLIENT_ID` (cùng giá trị `GOOGLE_OAUTH_CLIENT_ID` đã điền ở bước 2).
+Mở `http://localhost:5173` trong trình duyệt. Frontend mặc định gọi backend tại `http://localhost:8000/api/v1` — nếu backend chạy ở địa chỉ khác, tạo file `Frontend/.env` từ `Frontend/.env.example` và sửa `VITE_API_BASE_URL`/`VITE_WS_BASE_URL`. Muốn bật nút "Đăng nhập bằng Google" thì cũng cần tạo `Frontend/.env` và điền `VITE_GOOGLE_CLIENT_ID` (cùng giá trị `GOOGLE_OAUTH_CLIENT_ID` đã điền ở bước 2). Nút "Connect Google Calendar" thì **không cần** biến `VITE_*` nào — toàn bộ OAuth chạy ở backend (đã cấu hình ở bước 2), frontend chỉ mở 1 cửa sổ popup trỏ tới URL do backend trả về.
 
 ### 4. Dùng thử
 
@@ -135,6 +150,25 @@ Mở `http://localhost:5173` trong trình duyệt. Frontend mặc định gọi 
 10. Muốn thử **Memory**: vào `/memory`, bấm "Add memory" để lưu một điều bạn muốn Orbit nhớ, sửa/xoá qua menu 3 chấm trên mỗi thẻ.
 11. Muốn thử **Task Inbox ưu tiên**: vào `/tasks/inbox` (hoặc mục "Inbox" trong Sidebar) — task quá hạn/sắp đến hạn/priority cao/cần quyết định được nhóm riêng khỏi danh sách task đầy đủ ở `/tasks`.
 12. Muốn thử **Đăng nhập bằng Google**: cần đã điền `GOOGLE_OAUTH_CLIENT_ID`/`VITE_GOOGLE_CLIENT_ID` thật (xem bước 2, 3). Vào `/login` hoặc `/register`, bấm nút Google bên dưới nút Sign in/Create account — lần đầu sẽ tự tạo tài khoản mới (role admin nếu email trùng `INITIAL_ADMIN_EMAIL`), lần sau đăng nhập lại đúng tài khoản đó.
+13. Muốn thử **Calendar (per-user)**: cần đã điền `GOOGLE_CALENDAR_CLIENT_ID`/`GOOGLE_CALENDAR_CLIENT_SECRET`/`GOOGLE_CALENDAR_REDIRECT_URI`/`CREDENTIAL_ENCRYPTION_KEY` thật (xem bước 2 — client riêng, khác client đăng nhập, cần Authorized redirect URI khớp chính xác). Vào `/calendar`, bấm **Connect Google Calendar** (mở popup thật tới Google, không phải giả lập), chọn tài khoản Google, đồng ý quyền truy cập — popup tự đóng, sau đó xem/tạo/sửa/xoá sự kiện thật trên đúng Calendar của tài khoản Google vừa chọn. Đăng nhập bằng 2 tài khoản khác nhau và tự Connect 2 Google account khác nhau ở mỗi bên để thấy rõ mỗi người có Calendar riêng, không dùng chung — tạo sự kiện bên A không hiện bên B.
+
+### 5. Test Calendar cùng nhiều thành viên trong nhóm
+
+Calendar là tính năng **per-user** (mỗi người tự connect đúng Google Calendar của mình), nhưng cả nhóm **dùng chung 1 OAuth Client** (`GOOGLE_CALENDAR_CLIENT_ID`/`SECRET`) — không cần ai tạo Google Cloud project riêng, và không cần deploy online mới test được.
+
+1. **Một người trong nhóm** tạo Google Cloud project + OAuth Client theo đúng hướng dẫn ở bước 2 (mục "Connect Google Calendar"). Ở phần OAuth consent screen ("Audience" trong Console bản mới) → **Test users**, add **email Gmail của tất cả thành viên sẽ test** (tối đa 100, app đang ở chế độ Testing) — không phải chỉ email của người tạo.
+2. Người đó gửi `GOOGLE_CALENDAR_CLIENT_ID` + `GOOGLE_CALENDAR_CLIENT_SECRET` cho cả nhóm qua kênh riêng tư (chat nhóm) — **không** đưa lên GitHub/PR, không commit vào `.env`.
+3. Mỗi thành viên còn lại `git pull` rồi tự chạy backend + frontend trên máy mình như bước 1-3 ở trên, với:
+   - `DATABASE_URL` trỏ vào **database Postgres riêng trên máy họ** (không dùng chung DB với người khác — mỗi người có dữ liệu độc lập, kể cả token Calendar đã mã hoá).
+   - `GOOGLE_CALENDAR_CLIENT_ID`/`GOOGLE_CALENDAR_CLIENT_SECRET` = giá trị nhận ở bước 2 (dùng chung cho cả nhóm).
+   - `GOOGLE_CALENDAR_REDIRECT_URI` giữ nguyên mặc định `http://localhost:8000/api/v1/calendar/oauth/callback` — ai cũng chạy backend ở `localhost:8000` trên máy mình nên không cần đổi.
+   - `CREDENTIAL_ENCRYPTION_KEY` **tự sinh riêng** cho máy mình (không cần trùng với người khác, vì mỗi người có DB riêng ở trên).
+4. Mỗi người tự đăng ký 1 tài khoản Orbit riêng (bước 4.1), vào `/calendar` → **Connect Google Calendar** → chọn đúng Gmail đã được add làm Test user ở bước 1.
+
+Lỗi thường gặp khi test theo nhóm:
+- Bấm Connect ra lỗi `access_denied` ngay ở màn hình Google → email dùng để đăng nhập Google **không nằm trong Test users** (quay lại bước 1, add thêm).
+- Backend báo lỗi ngay khi bấm Connect, không mở được popup Google → quên điền hoặc quên **restart backend** sau khi sửa `GOOGLE_CALENDAR_CLIENT_ID`/`SECRET` trong `.env`.
+- Popup Google đóng lại nhưng báo "Could not connect Google Calendar." → xem log ở terminal đang chạy `python scripts/run_dev.py` ngay lúc đó để biết lý do cụ thể (thường in kèm traceback ở dòng `Failed to exchange the authorization code`).
 
 ### Chạy test backend
 
@@ -178,5 +212,6 @@ pytest tests/ -v
 - [Frontend/detai.md](Frontend/detai.md) — đề bài / yêu cầu gốc của dự án.
 - [ARCHITECTURE.md](ARCHITECTURE.md) — kiến trúc hệ thống hiện tại và các quyết định công nghệ.
 - [ROADMAP.md](ROADMAP.md) — bảng đối chiếu từng yêu cầu đề bài với trạng thái thật hiện tại + việc còn lại theo độ ưu tiên.
+- [docs/deploy.md](docs/deploy.md) — hướng dẫn deploy production (Render + Supabase + Vercel + CD qua GitHub Actions), từng bước dashboard theo đúng thứ tự + checklist verify end-to-end.
 - [WORKLOG.md](WORKLOG.md) — nhật ký công việc theo ngày của cả nhóm.
 - [docs/guide/](docs/guide/) — tài liệu khóa học AI20K (setup, LangGraph, FastAPI, testing, deploy).

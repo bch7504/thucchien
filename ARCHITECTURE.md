@@ -5,8 +5,9 @@
 Orbit là AI agent nhúng trong ứng dụng chat: FastAPI + LangGraph ở backend, React + Vite ở
 frontend, **PostgreSQL** làm database duy nhất (không còn hỗ trợ SQLite, xem mục Database). Backend
 có auth thật (JWT + bcrypt), nhắn tin 1-1/nhóm realtime qua WebSocket, phân
-quyền role user/admin, và agent LangGraph (LLM: Google Gemini hoặc Groq, đổi qua `.env`) với các
-tool có human-in-the-loop (calendar, reminder) cùng tool tóm tắt/trích xuất task. Toàn bộ tính
+quyền role user/admin, và agent LangGraph (LLM: Google Gemini, Groq, hoặc OpenAI, đổi qua `.env`)
+với các tool có human-in-the-loop (calendar, reminder) cùng tool tóm tắt/trích xuất task/tìm kiếm
+tin cũ. Toàn bộ tính
 năng người dùng (Tasks, Calendar, Reminders, Memory, Profile, AI Assistant, Admin) đã nối API thật
 — không còn trang nào dùng mock data.
 
@@ -103,12 +104,17 @@ graph TB
   (`summarize_conversation`, `extract_tasks`) dừng ngay sau khi chạy — dùng thẳng output làm câu trả
   lời, không gọi LLM lần 2 để "relay" lại (từng gây lỗi 400 do model tự hallucinate cú pháp tool call).
 - **State:** `AgentState` (TypedDict, `total=False`) — `messages` (reducer `add_messages`),
-  `context`, `summary`, `error`, `user_id`, ... (`src/agents/state.py`).
+  `context`, `summary`, `error`, `user_id`, `conversation_id` (chỉ set từ `routes.py`, không bao giờ
+  do LLM cung cấp — cho tool cần biết đang ở hội thoại nào mà không thể bị "spoof"), ...
+  (`src/agents/state.py`).
 - **Nodes:** `planner_node` (`src/agents/nodes/planner_node.py`) — bind `ALL_TOOLS`, inject ngày
   giờ hiện tại theo `calendar_timezone` vào system prompt (tránh agent đoán sai "tomorrow"/"next
   Monday"), ghi token usage qua `usage_service.log_usage`, bắt exception vào `state["error"]`.
-- **Tools** (`src/agents/tools/`, registry `ALL_TOOLS` trong `tools/__init__.py`):
+- **Tools** (`src/agents/tools/`, registry `ALL_TOOLS` trong `tools/__init__.py`, 9 tool):
   - `summarize_conversation`, `extract_tasks` — đọc `state["context"]`, không cần xác nhận.
+  - `search_messages` — tìm tin nhắn cũ trong đúng hội thoại đang chat theo từ khoá (Postgres
+    `ILIKE`, không phải semantic search — dự án chủ động không dùng vector store), đọc-only, không
+    cần xác nhận; `conversation_id` lấy từ `state`, không phải tham số LLM tự truyền.
   - `create_calendar_event` / `list_calendar_events` / `update_calendar_event` /
     `delete_calendar_event` — Google Calendar thật qua `google-api-python-client`; mọi thao tác có
     tác dụng phụ đều bắt buộc `interrupt()` chờ xác nhận người dùng trước khi gọi API thật.
@@ -163,7 +169,10 @@ graph LR
   suggested/pending/in_progress/completed/dismissed, source manual/proactive), `Reminder` (status
   scheduled/fired/cancelled), `Memory` (ghi chú cá nhân người dùng tự thêm — category/title/detail,
   **khác** với agent checkpoint memory ở trên), `UsageLog` (token mỗi lần gọi LLM),
-  `CalendarSyncState` (1 dòng, lưu `syncToken` cho polling đồng bộ Google Calendar). Ngoài ra
+  `GoogleCalendarCredential` (1 dòng/user — `refresh_token_enc`/`access_token_enc` mã hoá Fernet,
+  `sync_token` cho polling đồng bộ, `google_email` để hiện UI; tồn tại = user đó đã Connect Google
+  Calendar riêng của họ — trước đây là `CalendarSyncState` dùng chung 1 dòng "default" cho cả app
+  hồi Calendar còn là 1 tài khoản chia sẻ, không mã hoá gì cả). Ngoài ra
   APScheduler tự quản bảng `apscheduler_jobs`, và khi dùng Postgres, LangGraph tự quản các bảng
   `checkpoints`/`checkpoint_blobs`/`checkpoint_writes`/`checkpoint_migrations`.
 
@@ -242,6 +251,8 @@ ngoài `ci.yml` (lint + test trên GitHub Actions). Đây là hạng mục lớn
 | Frontend framework | React + Vite | Giữ nguyên so với đề bài gợi ý Next.js — tránh viết lại toàn bộ frontend không tương xứng lợi ích |
 | Realtime | WebSocket thuần (FastAPI) | Dùng chung 1 kênh cho chat, reminder-fired, proactive-suggestion, calendar sync — không mở kênh song song |
 | Scheduler | APScheduler (`SQLAlchemyJobStore`) | Bền vững qua restart, dùng chung cho reminder-fire và calendar-poll thay vì đổi hẳn sang BullMQ/Node |
-| Đồng bộ Google Calendar | Polling định kỳ với `syncToken` (không phải webhook `events.watch`) | Webhook thật của Google cần domain public HTTPS mà project chưa deploy — polling là lựa chọn thực tế, có thể nâng cấp lên webhook sau khi deploy |
+| Đồng bộ Google Calendar | Polling định kỳ với `syncToken`, lặp riêng theo từng user **đang online** đã Connect (không phải webhook `events.watch`) | Webhook thật của Google cần domain public HTTPS mà project chưa deploy — polling là lựa chọn thực tế, có thể nâng cấp lên webhook sau khi deploy. Chỉ poll user đang online (không phải mọi user đã Connect) để không tốn quota Google cho thay đổi lịch của người không mở app — họ tự fetch lại khi mở `/calendar` |
+| Google Calendar OAuth | Per-user, redirect thật (`GET /calendar/oauth/url` → Google → `GET /calendar/oauth/callback` ở backend), OAuth Client "Web application" tách biệt với client đăng nhập, `state` ký JWT mang `user_id` | Yêu cầu đề bài "lịch cá nhân" — user phải thấy đúng lịch của họ, không phải 1 lịch dùng chung cho cả app. Tách 2 OAuth Client vì đăng nhập chỉ verify ID token (không cần secret), Calendar cần authorization-code + refresh_token (bắt buộc có secret) — không phải xin quyền Calendar ngay lúc đăng nhập |
+| Mã hoá refresh token | Fernet (`src/auth/crypto.py`), key `CREDENTIAL_ENCRYPTION_KEY` | Refresh token Calendar là bí mật dài hạn — lộ ra là đọc/ghi được lịch của user vô thời hạn tới khi họ tự revoke, khác `password_hash` (một chiều) hay JWT `secret_key` (không phải thứ đọc trực tiếp ra hành động trên tài khoản Google người khác) |
 
 Tiến độ triển khai theo giai đoạn và các hạng mục còn lại: xem [ROADMAP.md](ROADMAP.md).

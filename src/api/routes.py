@@ -27,7 +27,12 @@ def _check_thread_owner(thread_id: str, current_user: User) -> None:
 
 
 def _format_messages(messages: list[ChatMessage]) -> str:
-    return "\n".join(f"{m.sender or m.role}: {m.content}" for m in messages)
+    lines = []
+    for m in messages:
+        ts = chat_service.format_local_timestamp(m.timestamp) if m.timestamp else None
+        who = f"{m.sender or m.role}" + (f" [{ts}]" if ts else "")
+        lines.append(f"{who}: {m.content}")
+    return "\n".join(lines)
 
 
 def _build_chat_response(result: dict, thread_id: str) -> ChatResponse:
@@ -89,8 +94,19 @@ async def chat(
 
     _thread_owners.setdefault(thread_id, current_user.id)
     config = {"configurable": {"thread_id": thread_id}}
-    context_text = _format_messages(request.messages) if request.messages else ""
-    inputs = {"messages": [HumanMessage(content=request.message)], "context": context_text, "user_id": current_user.id}
+    if request.conversation_id and request.scope:
+        # Server-resolved scope takes priority over any client-supplied `messages` - the whole
+        # point of `scope` is to not trust the client's already-loaded (at most 50) messages.
+        scoped = await chat_service.get_scoped_messages(db, request.conversation_id, current_user.id, request.scope)
+        context_text = _format_messages(scoped) if scoped else ""
+    else:
+        context_text = _format_messages(request.messages) if request.messages else ""
+    inputs = {
+        "messages": [HumanMessage(content=request.message)],
+        "context": context_text,
+        "user_id": current_user.id,
+        "conversation_id": request.conversation_id,
+    }
     try:
         result = await agent_graph.agent.ainvoke(inputs, config)
     except Exception as e:

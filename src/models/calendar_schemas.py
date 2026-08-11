@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import BaseModel, Field
 
 
@@ -22,3 +24,9 @@ class CalendarEventUpdateRequest(BaseModel):
     start_iso: str | None = None
     end_iso: str | None = None
     description: str | None = None
+
+
+class CalendarConnectionStatusOut(BaseModel):
+    connected: bool
+    google_email: str | None = None
+    connected_at: datetime | None = None
