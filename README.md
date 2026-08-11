@@ -118,6 +118,16 @@ cp .env.example .env
 uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
+Nếu đã có sẵn database Postgres từ trước (không phải tạo mới ở bước 1), chạy thêm 1 lần script
+migration để thêm cột `tasks.source_message_id` (dự án không dùng Alembic, `create_all` khi khởi
+động app chỉ tạo bảng còn thiếu chứ không tự ALTER bảng đã tồn tại — bỏ qua bước này thì proactive
+detection sẽ lỗi khi tạo Task do thiếu cột):
+```bash
+python scripts/migrate_add_task_source_message.py
+```
+An toàn chạy lại nhiều lần (idempotent). Database Postgres mới tạo trống thì không cần bước này —
+`create_all` đã tạo đúng schema đầy đủ ngay từ đầu.
+
 Nếu có `make` (macOS/Linux, hoặc cài Make trên Windows): dùng `make run` thay cho lệnh `uvicorn` ở trên.
 
 **Windows**: luôn dùng `python scripts/run_dev.py` thay cho lệnh `uvicorn` ở trên (cùng `--reload`, cùng cổng 8000) — không phải tuỳ chọn. Lý do: agent memory bền vững (`AsyncPostgresSaver`) cần `SelectorEventLoop`, nhưng CLI `uvicorn` trên Windows luôn chọn `ProactorEventLoop` trước cả khi app được import, không có cờ nào sửa được — `run_dev.py` gọi `uvicorn.run()` trực tiếp bằng Python để chỉ định đúng loại event loop.
