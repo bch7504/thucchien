@@ -116,6 +116,12 @@ class Task(Base):
     status: Mapped[str] = mapped_column(default="suggested")
     # "suggested" | "pending" | "in_progress" | "completed" | "dismissed"
     source: Mapped[str] = mapped_column(default="manual")  # "manual" | "proactive"
+    # id of the Message that proposed this commitment (proactive_service) - anchors dedup (an
+    # overlapping re-scan of the same window doesn't duplicate) and retraction (a later "huỷ nhé"/
+    # rescheduling message can find and dismiss every Task it spawned). NULL for source="manual".
+    source_message_id: Mapped[str | None] = mapped_column(
+        ForeignKey("messages.id", ondelete="SET NULL"), default=None, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     owner: Mapped["User"] = relationship()

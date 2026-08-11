@@ -77,6 +77,19 @@ async def get_ai_permission(db: AsyncSession, conversation_id: str, user_id: str
     ).scalar_one_or_none()
 
 
+async def get_granted_user_ids(db: AsyncSession, conversation_id: str) -> set[str]:
+    """All user_ids that have granted AI permission for this conversation - one query instead of
+    N calls to get_ai_permission, for proactive_service's multi-participant window (each message's
+    author needs their own grant checked before their content is readable by the AI)."""
+    rows = await db.execute(
+        select(AIPermission.user_id).where(
+            AIPermission.conversation_id == conversation_id,
+            AIPermission.granted.is_(True),
+        )
+    )
+    return {r[0] for r in rows.all()}
+
+
 async def set_ai_permission(db: AsyncSession, conversation_id: str, user_id: str, granted: bool) -> AIPermission:
     permission = await get_ai_permission(db, conversation_id, user_id)
     if permission is None:
