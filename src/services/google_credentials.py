@@ -32,7 +32,7 @@ if get_settings().google_calendar_redirect_uri.startswith("http://"):
     os.environ.setdefault("OAUTHLIB_INSECURE_TRANSPORT", "1")
 
 
-class CalendarNotConnected(Exception):  # noqa: N818 - matches docs/PER_USER_CALENDAR.md's exact name
+class CalendarNotConnected(Exception):  # noqa: N818
     """This user hasn't connected Google Calendar, or Google access was revoked on their end.
     Route layer turns this into a 409 (the app's own JWT is still fine - just no Calendar link),
     agent tools turn it into a friendly message instead of a crash."""
