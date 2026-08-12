@@ -1,6 +1,4 @@
-# Render Blueprint - see docs/deploy guide for the full manual setup flow (Supabase, Vercel, Google
-# OAuth Console). This only defines the backend web service; the Postgres database lives on
-# Supabase (external, not a Render-managed database), so there is no `databases:` block here.
+# Render deployment configuration for the backend.
 services:
   - type: web
     name: orbit-backend # URL = <name>.onrender.com - pick this before starting the manual setup
